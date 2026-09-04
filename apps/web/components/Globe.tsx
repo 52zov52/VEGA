@@ -171,7 +171,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         }}
         customThreeObjectUpdate={(obj: any, d: any) => {
           if (globeRef.current?.getCoords) {
-            const pos = globeRef.current.getCoords(d.lat, d.lng, 0.01);
+            const pos = globeRef.current.getCoords(d.lat, d.lng, 0);
             obj.position.set(pos.x, pos.y, pos.z);
           }
         }}
