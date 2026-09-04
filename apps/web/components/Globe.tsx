@@ -47,43 +47,21 @@ export { getCropRu };
 function createPinMesh(isSelected: boolean): THREE.Group {
   const group = new THREE.Group();
   const color = isSelected ? 0xffffff : 0x4caf50;
-  const emissive = isSelected ? 0x4caf50 : 0x2e7d32;
 
   // Палочка (цилиндр)
-  const stickGeo = new THREE.CylinderGeometry(0.004, 0.004, 0.04, 8);
-  const stickMat = new THREE.MeshPhongMaterial({
-    color,
-    emissive,
-    emissiveIntensity: 0.3,
-    shininess: 80,
-  });
+  const stickGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.08, 8);
+  const stickMat = new THREE.MeshBasicMaterial({ color });
   const stick = new THREE.Mesh(stickGeo, stickMat);
   stick.rotation.x = Math.PI / 2;
-  stick.position.z = 0.02;
+  stick.position.z = 0.04;
   group.add(stick);
 
   // Сфера (шарик сверху)
-  const headGeo = new THREE.SphereGeometry(0.012, 16, 16);
-  const headMat = new THREE.MeshPhongMaterial({
-    color,
-    emissive,
-    emissiveIntensity: 0.6,
-    shininess: 100,
-  });
+  const headGeo = new THREE.SphereGeometry(0.02, 16, 16);
+  const headMat = new THREE.MeshBasicMaterial({ color: isSelected ? 0x4caf50 : 0x1a1a1a });
   const head = new THREE.Mesh(headGeo, headMat);
-  head.position.z = 0.042;
+  head.position.z = 0.085;
   group.add(head);
-
-  // Точка на поверхности (подсветка)
-  const dotGeo = new THREE.SphereGeometry(0.006, 8, 8);
-  const dotMat = new THREE.MeshBasicMaterial({
-    color: isSelected ? 0xffffff : 0x4caf50,
-    transparent: true,
-    opacity: 0.8,
-  });
-  const dot = new THREE.Mesh(dotGeo, dotMat);
-  dot.position.z = 0.001;
-  group.add(dot);
 
   return group;
 }
