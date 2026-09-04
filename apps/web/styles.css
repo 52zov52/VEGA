@@ -1,0 +1,60 @@
+/* VEGA design tokens (§40): Scientific Intelligence / Earth Observation.
+   Никаких случайных цветов в компонентах — только эти переменные. */
+:root {
+  --bg: #10140f;
+  --surface: #181d17;
+  --surface-elevated: #20261f;
+  --text: #f2f4ec;
+  --text-muted: #a8b09f;
+  --accent-vegetation: #7cc46a;
+  --accent-warning: #e0a83c;
+  --accent-critical: #e05c5c;
+  --accent-info: #6aa9c4;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+[data-theme="light"] {
+  --bg: #f4f5ee;
+  --surface: #ffffff;
+  --surface-elevated: #eef0e6;
+  --text: #1c211a;
+  --text-muted: #5d6656;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Geist, Inter, system-ui, sans-serif;
+}
+a { color: var(--accent-vegetation); }
+.layout { display: grid; grid-template-columns: 300px 1fr 380px; height: 100vh; }
+.sidebar, .panel { background: var(--surface); padding: 16px; overflow-y: auto; }
+.map-wrap { position: relative; min-height: 0; }
+#map { position: absolute; inset: 0; }
+.kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+.kpi div { background: var(--surface-elevated); border-radius: var(--radius-md); padding: 10px; }
+.kpi b { font-size: 22px; display: block; }
+button {
+  background: var(--accent-vegetation); color: #10140f; border: 0;
+  border-radius: var(--radius-md); padding: 10px 14px; font-weight: 600; cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary { background: var(--surface-elevated); color: var(--text); }
+input, select {
+  width: 100%; padding: 8px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--surface-elevated); background: var(--surface-elevated); color: var(--text);
+}
+.badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+.badge.critical { background: var(--accent-critical); color: #fff; }
+.badge.stress { background: var(--accent-warning); color: #201500; }
+.badge.watch { background: var(--accent-info); color: #06222e; }
+.badge.normal { background: var(--accent-vegetation); color: #0e1a0c; }
+.card { background: var(--surface-elevated); border-radius: var(--radius-lg); padding: 14px; margin: 10px 0; }
+.bar { height: 8px; border-radius: 4px; background: #00000033; overflow: hidden; margin: 4px 0 10px; }
+.bar i { display: block; height: 100%; background: var(--accent-vegetation); }
+.skeleton { animation: pulse 1.2s infinite; background: var(--surface-elevated); border-radius: var(--radius-md); min-height: 60px; }
+@keyframes pulse { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; grid-template-rows: auto 50vh auto; } }

@@ -1,0 +1,15 @@
+{
+  "seed": 42,
+  "dataset_version": "v3",
+  "features": "v17",
+  "model": "ensemble(sklearn-hgb+sklearn-mlp+seasonal)",
+  "split": "time_forward",
+  "weights": {
+    "w_gbm": 1.0,
+    "w_temporal": 0.0,
+    "w_seasonal": 0.0
+  },
+  "score": 0.014238958877248815,
+  "gap_score": 25.73,
+  "train_time_s": 4.7
+}

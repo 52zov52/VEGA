@@ -1,0 +1,5 @@
+model,split,rmse,note
+nearest,time_forward,0.0,заполняется scripts/train.py
+linear,time_forward,0.0,заполняется scripts/train.py
+seasonal,time_forward,0.0,заполняется scripts/train.py
+ensemble,time_forward,0.0,заполняется scripts/train.py
