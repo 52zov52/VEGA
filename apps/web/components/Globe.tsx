@@ -43,47 +43,37 @@ function getCropRu(crop: string): string {
 
 export { getCropRu };
 
-// Большой 3D-пин (для отдаления): палочка + сфера
-function createBigPin(isSelected: boolean): THREE.Group {
+function createPinMesh(isSelected: boolean): THREE.Group {
   const group = new THREE.Group();
   const color = isSelected ? 0xffffff : 0x4caf50;
 
-  const stickGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.08, 8);
+  // Палочка
+  const stickGeo = new THREE.CylinderGeometry(1, 1, 30, 8);
   const stickMat = new THREE.MeshBasicMaterial({ color });
   const stick = new THREE.Mesh(stickGeo, stickMat);
   stick.rotation.x = Math.PI / 2;
-  stick.position.z = 0.04;
+  stick.position.z = 15;
   group.add(stick);
 
-  const headGeo = new THREE.SphereGeometry(0.02, 16, 16);
+  // Шарик сверху
+  const headGeo = new THREE.SphereGeometry(6, 16, 16);
   const headMat = new THREE.MeshBasicMaterial({ color: isSelected ? 0x4caf50 : 0x1a1a1a });
   const head = new THREE.Mesh(headGeo, headMat);
-  head.position.z = 0.085;
+  head.position.z = 33;
   group.add(head);
 
   return group;
 }
 
-// Маленькая точка (для приближения)
-function createSmallDot(isSelected: boolean): THREE.Group {
-  const group = new THREE.Group();
-  const color = isSelected ? 0xffffff : 0x4caf50;
-  const geo = new THREE.SphereGeometry(0.008, 8, 8);
-  const mat = new THREE.MeshBasicMaterial({ color });
-  const mesh = new THREE.Mesh(geo, mat);
-  group.add(mesh);
-  return group;
-}
-
-const LOD_THRESHOLD = 0.15;
+const MIN_SCALE = 0.0003;
+const MAX_SCALE = 0.003;
 
 export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger }: Props) {
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
   const [popup, setPopup] = useState<{ field: Field; x: number; y: number } | null>(null);
-  const zoomRef = useRef(0.9);
-  const [lodKey, setLodKey] = useState<"far" | "near">("far");
+  const altitudeRef = useRef(0.9);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +86,6 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     return () => { cancelled = true; };
   }, []);
 
-  // Полигоны
   const polygonData = fields
     .filter((f) => f.geometry?.coordinates)
     .map((f) => ({
@@ -118,27 +107,21 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     return `${colors[d.level] || "#4caf50"}44`;
   }, []);
 
-  // Данные пинов — lodKey в каждом объекте чтобы Three.js пересоздавал объекты при смене LOD
   const pinData = useMemo(() =>
     fields.filter((f) => f.center).map((f) => ({
       id: f.id,
-      lod: lodKey,
       lat: f.center[0],
       lng: f.center[1],
       crop: f.crop,
       area_ha: f.area_ha,
       isSelected: f.id === selectedId,
     })),
-  [fields, selectedId, lodKey]);
+  [fields, selectedId]);
 
-  // LOD: переключение big/small по zoom
-  const handleZoom = useCallback((altitude: number) => {
-    zoomRef.current = altitude;
-    const next = altitude > LOD_THRESHOLD ? "far" : "near";
-    setLodKey((prev) => (prev === next ? prev : next));
+  const handleZoomRotate = useCallback((altitude: number) => {
+    altitudeRef.current = altitude;
   }, []);
 
-  // Летим к полю
   useEffect(() => {
     if (!globeRef.current || !selectedId) return;
     const field = fields.find((f) => f.id === selectedId);
@@ -146,7 +129,6 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     globeRef.current.pointOfView({ lat: field.center[0], lng: field.center[1], altitude: 0.04 }, 1600);
   }, [selectedId, flyToTrigger, fields]);
 
-  // Летим к региону
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;
     if (selectedId) return;
@@ -174,7 +156,6 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         globeTileEngineUrl={(x: number, y: number, l: number) =>
           `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${l}/${y}/${x}`
         }
-        // Полигоны
         polygonsData={polygonData}
         polygonGeoJsonGeometry="geoJsonGeometry"
         polygonCapColor={polyCapColor}
@@ -183,13 +164,11 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
-        onGlobeZoom={handleZoom}
-        onGlobeRotate={handleZoom}
-        // LOD: пересоздаём custom layer при смене zoom-уровня
+        onGlobeZoom={handleZoomRotate}
+        onGlobeRotate={handleZoomRotate}
         customLayerData={pinData}
         customThreeObject={(d: any) => {
-          const isFar = d.lod === "far";
-          const mesh = isFar ? createBigPin(d.isSelected) : createSmallDot(d.isSelected);
+          const mesh = createPinMesh(d.isSelected);
           mesh.userData = { fieldData: d };
           return mesh;
         }}
@@ -197,6 +176,11 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
           if (globeRef.current?.getCoords) {
             const pos = globeRef.current.getCoords(d.lat, d.lng, 0);
             obj.position.set(pos.x, pos.y, pos.z);
+            // Масштаб = f(altitude): дальше = крупнее, ближе = мельче
+            const alt = altitudeRef.current;
+            const t = Math.min(alt / 1.5, 1);
+            const scale = MIN_SCALE + t * (MAX_SCALE - MIN_SCALE);
+            obj.scale.set(scale, scale, scale);
           }
         }}
         onCustomLayerClick={(obj: any) => {
@@ -219,7 +203,6 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         style={{ width: "100%", height: "100%" }}
       />
 
-      {/* HTML-попап */}
       {popup && (
         <div
           className="globe-popup-overlay"
