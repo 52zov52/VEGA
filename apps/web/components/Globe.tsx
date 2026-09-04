@@ -47,7 +47,6 @@ function createPinMesh(isSelected: boolean): THREE.Group {
   const group = new THREE.Group();
   const color = isSelected ? 0xffffff : 0x4caf50;
 
-  // Палочка
   const stickGeo = new THREE.CylinderGeometry(1, 1, 30, 8);
   const stickMat = new THREE.MeshBasicMaterial({ color });
   const stick = new THREE.Mesh(stickGeo, stickMat);
@@ -55,7 +54,6 @@ function createPinMesh(isSelected: boolean): THREE.Group {
   stick.position.z = 15;
   group.add(stick);
 
-  // Шарик сверху
   const headGeo = new THREE.SphereGeometry(6, 16, 16);
   const headMat = new THREE.MeshBasicMaterial({ color: isSelected ? 0x4caf50 : 0x1a1a1a });
   const head = new THREE.Mesh(headGeo, headMat);
@@ -73,7 +71,8 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
   const [popup, setPopup] = useState<{ field: Field; x: number; y: number } | null>(null);
-  const altitudeRef = useRef(0.9);
+  const meshRefs = useRef<Map<string, THREE.Group>>(new Map());
+  const rafId = useRef<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,9 +117,28 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     })),
   [fields, selectedId]);
 
-  const handleZoomRotate = useCallback((altitude: number) => {
-    altitudeRef.current = altitude;
-  }, []);
+  // rAF-цикл: читаем altitude из pointOfView(), скейлим все пины
+  useEffect(() => {
+    const globe = globeRef.current;
+    if (!globe) return;
+
+    const animate = () => {
+      try {
+        const pov = globe.pointOfView();
+        if (pov && typeof pov.altitude === "number") {
+          const t = Math.min(pov.altitude / 1.5, 1);
+          const scale = MIN_SCALE + t * (MAX_SCALE - MIN_SCALE);
+          meshRefs.current.forEach((mesh) => {
+            mesh.scale.set(scale, scale, scale);
+          });
+        }
+      } catch {}
+      rafId.current = requestAnimationFrame(animate);
+    };
+
+    rafId.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId.current);
+  }, [ready]);
 
   useEffect(() => {
     if (!globeRef.current || !selectedId) return;
@@ -164,23 +182,17 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
-        onGlobeZoom={handleZoomRotate}
-        onGlobeRotate={handleZoomRotate}
         customLayerData={pinData}
         customThreeObject={(d: any) => {
           const mesh = createPinMesh(d.isSelected);
           mesh.userData = { fieldData: d };
+          meshRefs.current.set(d.id, mesh);
           return mesh;
         }}
         customThreeObjectUpdate={(obj: any, d: any) => {
           if (globeRef.current?.getCoords) {
             const pos = globeRef.current.getCoords(d.lat, d.lng, 0);
             obj.position.set(pos.x, pos.y, pos.z);
-            // Масштаб = f(altitude): дальше = крупнее, ближе = мельче
-            const alt = altitudeRef.current;
-            const t = Math.min(alt / 1.5, 1);
-            const scale = MIN_SCALE + t * (MAX_SCALE - MIN_SCALE);
-            obj.scale.set(scale, scale, scale);
           }
         }}
         onCustomLayerClick={(obj: any) => {
