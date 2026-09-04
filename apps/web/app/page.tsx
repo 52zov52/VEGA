@@ -4,6 +4,7 @@ import * as echarts from "echarts";
 import dynamic from "next/dynamic";
 import { MapPin, Layers, Pencil, Trash2, BarChart3, Play } from "lucide-react";
 import Modal from "../components/Modal";
+import Starfield from "../components/Starfield";
 import KPI from "../components/KPI";
 import AnomalyCard from "../components/AnomalyCard";
 import { LoadingSkeleton, EmptyState, ErrorState, PipelineState } from "../components/UIStates";
@@ -368,6 +369,7 @@ export default function Page() {
 
         {/* Globe */}
         <main className="globe-wrap">
+          <Starfield />
           <Globe
             fields={fields}
             selectedId={fieldId}
