@@ -104,7 +104,7 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
     const field = fields.find((f) => f.id === selectedId);
     if (!field) return;
     const [lat, lng] = field.center;
-    globeRef.current.pointOfView({ lat, lng, altitude: 0.45 }, 1400);
+    globeRef.current.pointOfView({ lat, lng, altitude: 0.08 }, 1600);
   }, [selectedId, flyToTrigger, fields]);
 
   // Летим к региону
@@ -142,16 +142,16 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
         polygonCapColor={polyCapColor}
         polygonSideColor={polySideColor}
         polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffaa" : "transparent"}
-        polygonAltitude={(d: any) => d.id === selectedId ? 0.005 : 0.001}
-        polygonStrokeWidth={(d: any) => d.id === selectedId ? 1.5 : 0}
+        polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
+        polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
         // Маленькие точки
         pointsData={pointData}
         pointLat="lat"
         pointLng="lng"
-        pointColor={(d: any) => d.isSelected ? "#ffffff" : "#7cc46a"}
-        pointAltitude={(d: any) => d.isSelected ? 0.012 : 0.005}
-        pointRadius={(d: any) => d.isSelected ? 0.18 : 0.1}
+        pointColor={(d: any) => d.isSelected ? "#ffffff" : "#4caf50"}
+        pointAltitude={(d: any) => d.isSelected ? 0.003 : 0.001}
+        pointRadius={(d: any) => d.isSelected ? 0.02 : 0.012}
         pointsMerge={false}
         onPointClick={(d: any) => onSelect(d.id)}
         // Контролы
