@@ -104,7 +104,7 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
     const field = fields.find((f) => f.id === selectedId);
     if (!field) return;
     const [lat, lng] = field.center;
-    globeRef.current.pointOfView({ lat, lng, altitude: 0.08 }, 1600);
+    globeRef.current.pointOfView({ lat, lng, altitude: 0.04 }, 1600);
   }, [selectedId, flyToTrigger, fields]);
 
   // Летим к региону
