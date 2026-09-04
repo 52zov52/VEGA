@@ -1,7 +1,8 @@
 """Time-aware validation (§10): forward splits + leave-polygon-out.
 
 Обычный random split запрещён — он даёт leakage внутри одного временного
-ряда и завышает качество. Здесь только сплиты по времени и по полигонам.
+ряда и завышает качество. Только сплиты по времени и по полигонам.
+Годы определяются по данным: последние два года — validation-фолды.
 """
 from __future__ import annotations
 
@@ -9,17 +10,19 @@ import pandas as pd
 
 
 def time_forward_splits(df: pd.DataFrame, date_col: str = "date") -> list[tuple[pd.DataFrame, pd.DataFrame]]:
-    """Два фолда: train 2019-2022/valid 2023 и train 2019-2023/valid 2024."""
+    """Два фолда: train до Y-2/valid Y-1 и train до Y-1/valid Y (Y — последний год)."""
     work = df.copy()
     work["_y"] = pd.to_datetime(work[date_col]).dt.year
-    splits = []
-    for train_years, valid_year in (([2019, 2020, 2021, 2022], 2023), ([2019, 2020, 2021, 2022, 2023], 2024)):
-        tr = work[work["_y"].isin(train_years)].drop(columns=["_y"])
-        va = work[work["_y"] == valid_year].drop(columns=["_y"])
-        if len(tr) and len(va):
-            splits.append((tr.reset_index(drop=True), va.reset_index(drop=True)))
-    # Fallback для коротких demo-диапазонов: сплит по медиане даты.
+    years = sorted(work["_y"].dropna().unique().tolist())
+    splits: list[tuple[pd.DataFrame, pd.DataFrame]] = []
+    if len(years) >= 2:
+        for vy in years[-2:]:
+            tr = work[work["_y"] < vy].drop(columns=["_y"])
+            va = work[work["_y"] == vy].drop(columns=["_y"])
+            if len(tr) and len(va):
+                splits.append((tr.reset_index(drop=True), va.reset_index(drop=True)))
     if not splits and len(work):
+        # Короткий диапазон: сплит по медиане даты.
         cut = pd.to_datetime(work[date_col]).median()
         tr = work[pd.to_datetime(work[date_col]) < cut].drop(columns=["_y"])
         va = work[pd.to_datetime(work[date_col]) >= cut].drop(columns=["_y"])

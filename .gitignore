@@ -12,6 +12,11 @@ models/*.pt
 models/*.cbm
 data/raw/
 data/cache/
+data/*.csv
+doc-*.csv
+doc-*.zip
+submission*.csv
+.pytest_cache/
 *.log
 .DS_Store
 apps/web/.next/

@@ -40,11 +40,28 @@ COLUMN_ALIASES: dict[str, str] = {
     "anon_polygon_id": "polygon_id",
     "field_id": "polygon_id",
     "ndvi": "primary_ndvi",
+    # Конкурсная схема (сенсоры + ERA5):
+    "era5_temp_c": "temperature",
+    "era5_precip_mm": "precipitation",
     "t2m": "temperature",
     "temp": "temperature",
     "rain": "precipitation",
     "precip": "precipitation",
+    "crop_type": "crop",
+    "ndvi_climatology_mean": "clim_mean_given",
+    "ndvi_climatology_std": "clim_std_given",
 }
+
+# Колонки, которые нельзя использовать как признаки в момент прогноза:
+# same-day значения сенсоров/ERA5/климатологии организаторов равны NaN
+# во всех скрытых строках, zscore/status есть только в train.
+FORBIDDEN_FEATURE_COLS: tuple[str, ...] = (
+    "s2_ndvi", "s2_evi", "s2_ndwi",
+    "landsat_ndvi", "landsat_evi", "landsat_ndwi",
+    "modis_ndvi", "modis_evi",
+    "clim_mean_given", "clim_std_given",
+    "ndvi_zscore", "status",
+)
 
 
 def normalize_columns(df):

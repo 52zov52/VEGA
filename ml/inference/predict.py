@@ -39,18 +39,27 @@ def load_artifacts(model_dir: str | Path) -> dict | None:
     return bundle
 
 
-def predict_gaps(df: pd.DataFrame, artifacts: dict) -> pd.Series:
-    """Возвращает Series восстановленного target в порядке входного df."""
+def predict_gaps(df: pd.DataFrame, artifacts: dict, clim=None) -> pd.Series:
+    """Возвращает Series восстановленного target в порядке входного df.
+
+    clim: fitted PastClimatology (валидация — только train-история).
+    По умолчанию fitted на истинно известных строках входа.
+    """
+    from services.climatology.climatology import PastClimatology
+
     work = df.copy()
     work["date"] = pd.to_datetime(work["date"]).dt.date
     order = work.index
     mask = work[TARGET_COL].isna()
     if not mask.any():
         return work[TARGET_COL].astype(float)
+    # Past-only климатология по истинно известным (NaN пропусков не участвуют).
+    if clim is None:
+        clim = PastClimatology().fit(work)
     # Преднаполнение прошлым: линейная интерполяция для стабильных лагов.
     prefilled = work.copy()
     prefilled[TARGET_COL] = prefilled.groupby("polygon_id")[TARGET_COL].transform(baseline_linear)
-    feat, cols = build_features(prefilled)
+    feat, cols = build_features(prefilled, clim=clim)
     feat_cols = artifacts.get("feature_cols") or cols
     feat_cols = [c for c in feat_cols if c in feat.columns]
     X = feat[feat_cols]
