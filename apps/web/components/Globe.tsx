@@ -15,9 +15,9 @@ type Props = {
   fields: Field[];
   selectedId: string;
   onSelect: (id: string) => void;
-  onCameraChange?: (lat: number, lng: number, altitude: number) => void;
+  onFieldHover?: (id: string | null) => void;
   regionCenter?: [number, number];
-  flyTo?: number;
+  flyToTrigger?: number;
 };
 
 const LEVEL_COLOR: Record<string, string> = {
@@ -27,15 +27,12 @@ const LEVEL_COLOR: Record<string, string> = {
   normal: "#7cc46a",
 };
 
-// Спутниковые тайлы ESRI World Imagery — бесплатные, 1м разрешение, без API-ключа
-const ESRI_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-
-export default function Globe({ fields, selectedId, onSelect, regionCenter, flyTo }: Props) {
+export default function Globe({ fields, selectedId, onSelect, onFieldHover, regionCenter, flyToTrigger }: Props) {
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
+  const prevSelected = useRef<string>("");
 
-  // Динамический импорт — отключаем SSR (react-globe.gl требует window)
   useEffect(() => {
     let cancelled = false;
     import("react-globe.gl").then((mod) => {
@@ -47,39 +44,56 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
     return () => { cancelled = true; };
   }, []);
 
-  // Генерируем GeoJSON-полигоны для отрисовки на глобусе
+  // Полигоны полей
   const polygonData = fields
     .filter((f) => f.geometry?.coordinates)
-    .map((f) => {
-      const coords = f.geometry.coordinates[0];
-      // polygonGeoJsonGeometry ожидает { type: "Polygon", coordinates: [...] }
-      return {
-        id: f.id,
-        level: f.level || "normal",
-        geoJsonGeometry: JSON.stringify({
-          type: "Polygon",
-          coordinates: [coords],
-        }),
-      };
-    });
+    .map((f) => ({
+      id: f.id,
+      level: f.level || "normal",
+      geoJsonGeometry: JSON.stringify({
+        type: "Polygon",
+        coordinates: [f.geometry.coordinates[0]],
+      }),
+    }));
 
-  // Цвет полигона по уровню риска
   const polyCapColor = useCallback((d: any) => {
     const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}55`; // полупрозрачный
+    return `${c}44`;
   }, []);
 
   const polySideColor = useCallback((d: any) => {
     const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}88`;
+    return `${c}77`;
   }, []);
 
-  // Летать к региону при смене
+  // Точки (маркеры) — одно выбранное поле
+  const pointData = fields
+    .filter((f) => f.id === selectedId && f.center)
+    .map((f) => ({
+      id: f.id,
+      lat: f.center[0],
+      lng: f.center[1],
+      size: 0.6,
+      color: "#7cc46a",
+      label: f.id,
+    }));
+
+  // Летим к полю при выборе
+  useEffect(() => {
+    if (!globeRef.current || !selectedId) return;
+    const field = fields.find((f) => f.id === selectedId);
+    if (!field) return;
+    const [lat, lng] = field.center;
+    globeRef.current.pointOfView({ lat, lng, altitude: 0.5 }, 1200);
+  }, [selectedId, flyToTrigger, fields]);
+
+  // Летим к региону
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;
+    if (selectedId) return; // если поле выбрано — летим к полю
     const [lat, lng] = regionCenter;
     globeRef.current.pointOfView({ lat, lng, altitude: 0.8 }, 1000);
-  }, [regionCenter, flyTo]);
+  }, [regionCenter]);
 
   if (!ready || !GlobeComp) {
     return (
@@ -87,6 +101,7 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
         width: "100%", height: "100%", display: "flex",
         alignItems: "center", justifyContent: "center",
         background: "#0a0e09", color: "var(--text-muted)",
+        fontSize: 13,
       }}>
         Загрузка глобуса…
       </div>
@@ -100,30 +115,39 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
       backgroundImageUrl=""
       backgroundColor="#0a0e09"
       atmosphereColor="#7cc46a"
-      atmosphereAltitude={0.2}
-      // Спутниковые тайлы поверх текстуры Земли
+      atmosphereAltitude={0.15}
       globeTileEngineUrl={(x: number, y: number, l: number) =>
         `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${l}/${y}/${x}`
       }
-      // Полигоны полей
+      // Полигоны
       polygonsData={polygonData}
       polygonGeoJsonGeometry="geoJsonGeometry"
       polygonCapColor={polyCapColor}
       polygonSideColor={polySideColor}
-      polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffff" : "transparent"}
-      polygonAltitude={(d: any) => d.id === selectedId ? 0.008 : 0.003}
+      polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffcc" : "transparent"}
+      polygonAltitude={(d: any) => d.id === selectedId ? 0.006 : 0.002}
       onPolygonClick={(d: any) => onSelect(d.id)}
-      // Клик по глобусу — выбор точки
-      onGlobeClick={(d: any) => {
-        // клик по пустому месту — ничего
-      }}
-      // Кастомные HTML-маркеры для избранных полей
-      labelsData={fields.filter((f) => f.id === selectedId)}
+      polygonStrokeWidth={(d: any) => d.id === selectedId ? 2 : 0}
+      // Точки (маркеры)
+      pointsData={pointData}
+      pointLat="lat"
+      pointLng="lng"
+      pointColor="color"
+      pointAltitude={0.01}
+      pointRadius={0.35}
+      pointsMerge={false}
+      onPointClick={(d: any) => onSelect(d.id)}
+      // Labels
+      labelsData={pointData}
       labelLat="lat"
       labelLng="lng"
-      labelText={() => ""}
-      labelSize={0}
-      // Контролы
+      labelText="label"
+      labelSize={0.8}
+      labelDotRadius={0.3}
+      labelColor={() => "#7cc46a"}
+      labelResolution={2}
+      labelAltitude={0.012}
+      // Controls
       controlGlobe={false}
       animateIn={true}
       width={undefined}

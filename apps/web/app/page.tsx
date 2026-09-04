@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as echarts from "echarts";
 import dynamic from "next/dynamic";
+import Modal from "../components/Modal";
 import KPI from "../components/KPI";
 import AnomalyCard from "../components/AnomalyCard";
 import { LoadingSkeleton, EmptyState, ErrorState, PipelineState } from "../components/UIStates";
@@ -21,7 +22,6 @@ const REGION_COORDS: Record<string, [number, number]> = {
 
 export default function Page() {
   const chartRef = useRef<HTMLDivElement>(null);
-  const compareRef = useRef<HTMLDivElement>(null);
   const [regions, setRegions] = useState<any[]>([]);
   const [regionQuery, setRegionQuery] = useState("");
   const [regionId, setRegionId] = useState("rostov");
@@ -40,6 +40,8 @@ export default function Page() {
   const [compareData, setCompareData] = useState<any[]>([]);
   const [comparing, setComparing] = useState(false);
   const [globeFlyTo, setGlobeFlyTo] = useState(0);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedField, setSelectedField] = useState<Field | null>(null);
 
   async function loadRegions(q = "") {
     try {
@@ -73,8 +75,10 @@ export default function Page() {
 
   const handleFieldSelect = useCallback((id: string) => {
     setFieldId(id);
+    const field = fields.find((f) => f.id === id);
+    setSelectedField(field || null);
     setGlobeFlyTo((n) => n + 1);
-  }, []);
+  }, [fields]);
 
   // Клики карты -> вершины рисуемого полигона
   useEffect(() => {
@@ -88,7 +92,7 @@ export default function Page() {
   }, [drawMode]);
 
   async function finishDrawing() {
-    if (vertices.length < 3) { setError("Нужно минимум 3 точки: кликайте по карте."); return; }
+    if (vertices.length < 3) { setError("Нужно минимум 3 точки."); return; }
     const geometry = { type: "Polygon", coordinates: [[...vertices, vertices[0]]] };
     try {
       const r = await fetch(`${API}/api/polygons`, {
@@ -98,8 +102,9 @@ export default function Page() {
       const poly = await r.json();
       setSaved((s) => [...s, poly]);
       setFieldId(poly.id);
+      setSelectedField(poly);
       setVertices([]); setDrawMode(false);
-    } catch { setError("Не удалось сохранить полигон: backend недоступен."); }
+    } catch { setError("Не удалось сохранить полигон."); }
   }
 
   async function deleteSaved(id: string) {
@@ -109,7 +114,7 @@ export default function Page() {
     } catch { setError("Не удалось удалить полигон."); }
   }
 
-  // График: observed + climatology + anomaly zones + precipitation
+  // График
   useEffect(() => {
     if (!chartRef.current || !ts.length) return;
     const chart = echarts.init(chartRef.current);
@@ -182,28 +187,6 @@ export default function Page() {
     return () => { window.removeEventListener("resize", onResize); chart.dispose(); };
   }, [ts, layers.ndvi, layers.anomaly]);
 
-  // Сравнительный график
-  useEffect(() => {
-    if (!compareRef.current || !compareData.length) return;
-    const chart = echarts.init(compareRef.current);
-    const dates = compareData[0]?.ts.map((p: any) => p.date) || [];
-    chart.setOption({
-      backgroundColor: "transparent",
-      tooltip: { trigger: "axis", backgroundColor: "#181d17ee", borderColor: "#2a3029", textStyle: { color: "#f2f4ec" } },
-      legend: { textStyle: { color: "#a8b09f" } },
-      xAxis: { type: "category", data: dates, axisLine: { lineStyle: { color: "#2a3029" } }, axisLabel: { color: "#a8b09f" } },
-      yAxis: { type: "value", name: "NDVI", axisLine: { lineStyle: { color: "#2a3029" } }, axisLabel: { color: "#a8b09f" }, splitLine: { lineStyle: { color: "#1e241c" } } },
-      series: compareData.map((c: any, i: number) => ({
-        name: c.id, type: "line", smooth: true, symbol: "none",
-        data: c.ts.map((p: any) => p.ndvi_observed),
-        lineStyle: { color: ["#7cc46a", "#6aa9c4", "#e0a83c", "#e05c5c", "#b48ce0"][i % 5], width: 2 },
-      })),
-    });
-    const onResize = () => chart.resize();
-    window.addEventListener("resize", onResize);
-    return () => { window.removeEventListener("resize", onResize); chart.dispose(); };
-  }, [compareData]);
-
   async function fetchAnalysis(pid: string) {
     const r = await fetch(`${API}/api/analyze`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -224,6 +207,7 @@ export default function Page() {
       const full = await fetchAnalysis(pid);
       setAnalysis(full);
       setTs(full.ts);
+      setModalOpen(true);
     } catch (err: any) {
       setError(`Анализ недоступен: ${err.message}.`);
     } finally {
@@ -254,26 +238,26 @@ export default function Page() {
 
   return (
     <div className="app">
-      {/* ─── Header ─── */}
+      {/* Header */}
       <header className="header">
         <div className="header-brand">
           <span className="header-logo">◇</span>
           <span className="header-title">VEGA</span>
-          <span className="header-sub">Vegetation Intelligence</span>
+          <span className="header-sub">Мониторинг вегетации</span>
         </div>
         <div className="header-actions">
           <button className="btn-secondary" onClick={() => runAnalyze(true)} disabled={loading}>
-            Demo mode
+            Демо
           </button>
           <button className="btn-primary" onClick={() => runAnalyze(false)} disabled={loading || !fieldId}>
-            {loading ? <PipelineState /> : "Run live analysis"}
+            {loading ? "Анализ…" : "Анализ поля"}
           </button>
         </div>
       </header>
 
-      {/* ─── Main layout ─── */}
-      <div className="layout">
-        {/* ─── Sidebar ─── */}
+      {/* Layout: sidebar + globe (без правой панели) */}
+      <div className="layout layout--no-panel">
+        {/* Sidebar */}
         <aside className="sidebar">
           <div className="sidebar-section">
             <label className="label" htmlFor="region-search">Регион</label>
@@ -290,9 +274,9 @@ export default function Page() {
               onChange={(e) => setRegionId(e.target.value)}
             >
               {(regions.length ? regions : [
-                { id: "rostov", name: "Rostov region" },
-                { id: "krasnodar", name: "Krasnodar region" },
-                { id: "voronezh", name: "Voronezh region" },
+                { id: "rostov", name: "Ростовская область" },
+                { id: "krasnodar", name: "Краснодарский край" },
+                { id: "voronezh", name: "Воронежская область" },
               ]).map((r: any) => (
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
@@ -310,7 +294,7 @@ export default function Page() {
               <ErrorState text="Не удалось загрузить поля." onRetry={() => setRegionId((r) => r)} />
             )}
             <div className="field-list">
-              {fields.slice(0, 15).map((f) => (
+              {fields.slice(0, 20).map((f) => (
                 <div
                   key={f.id}
                   className={`field-card ${f.id === fieldId ? "selected" : ""}`}
@@ -380,69 +364,65 @@ export default function Page() {
           </div>
         </aside>
 
-        {/* ─── Globe / Map ─── */}
+        {/* Globe */}
         <main className="globe-wrap">
           <Globe
             fields={fields}
             selectedId={fieldId}
             onSelect={handleFieldSelect}
             regionCenter={REGION_COORDS[regionId] || [47.2, 39.7]}
-            flyTo={globeFlyTo}
+            flyToTrigger={globeFlyTo}
           />
           {drawMode && (
             <div className="draw-overlay">
-              ✏ Режим рисования: кликните {Math.max(0, 3 - vertices.length)}+ точек
+              ✏ Кликните {Math.max(0, 3 - vertices.length)}+ точек на карте
+            </div>
+          )}
+          {/* Мини-бар выбранного поля */}
+          {selectedField && !modalOpen && (
+            <div className="selected-bar" onClick={() => setModalOpen(true)}>
+              <span className="selected-bar-id">{selectedField.id}</span>
+              <span className="selected-bar-crop">{selectedField.crop}</span>
+              <span className="selected-bar-area">{selectedField.area_ha} га</span>
+              <span className="selected-bar-hint">Нажмите для анализа →</span>
             </div>
           )}
         </main>
-
-        {/* ─── Analysis panel ─── */}
-        <aside className="panel">
-          {error && <ErrorState text={error} />}
-
-          <div className="panel-header">
-            <span className="label">Поле</span>
-            <span className="panel-field-id">{fieldId || "—"}</span>
-          </div>
-
-          {loading && <PipelineState />}
-
-          {!loading && !kpi.current_ndvi && (
-            <EmptyState text="Выберите поле и нажмите «Run live analysis»." icon="◉" />
-          )}
-
-          {!!kpi.current_ndvi && (
-            <>
-              <KPI data={kpi} />
-
-              <div className="chart-container">
-                <div ref={chartRef} style={{ width: "100%", height: 260 }} />
-              </div>
-
-              {analysis?.anomalies?.slice(0, 3).map((a: any, i: number) => (
-                <div key={i} className="anomaly-mini">
-                  <span className={`badge ${a.level}`}>{a.level}</span>
-                  <span className="anomaly-mini-period">{a.start_date} — {a.end_date}</span>
-                  <span className="anomaly-mini-score">score {a.anomaly_score}</span>
-                </div>
-              ))}
-
-              {!analysis?.anomalies?.length && (
-                <div className="all-clear">
-                  <span className="all-clear-icon">●</span>
-                  Аномалий не выявлено — поле в норме.
-                </div>
-              )}
-
-              {expl && <AnomalyCard explanation={expl} />}
-
-              {analysis?.warnings?.map((w: string, i: number) => (
-                <div key={i} className="info-note">ℹ {w}</div>
-              ))}
-            </>
-          )}
-        </aside>
       </div>
+
+      {/* Модальное окно анализа */}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={selectedField ? `Поле ${selectedField.id}` : "Анализ"}>
+        {loading && <PipelineState />}
+        {error && <ErrorState text={error} />}
+        {!loading && !kpi.current_ndvi && (
+          <EmptyState text="Нажмите «Анализ поля» для сбора данных." icon="◉" />
+        )}
+        {!!kpi.current_ndvi && (
+          <>
+            <KPI data={kpi} />
+            <div className="chart-container">
+              <div ref={chartRef} style={{ width: "100%", height: 280 }} />
+            </div>
+            {analysis?.anomalies?.slice(0, 3).map((a: any, i: number) => (
+              <div key={i} className="anomaly-mini">
+                <span className={`badge ${a.level}`}>{a.level}</span>
+                <span className="anomaly-mini-period">{a.start_date} — {a.end_date}</span>
+                <span className="anomaly-mini-score">score {a.anomaly_score}</span>
+              </div>
+            ))}
+            {!analysis?.anomalies?.length && (
+              <div className="all-clear">
+                <span className="all-clear-icon">●</span>
+                Аномалий не выявлено — поле в норме.
+              </div>
+            )}
+            {expl && <AnomalyCard explanation={expl} />}
+            {analysis?.warnings?.map((w: string, i: number) => (
+              <div key={i} className="info-note">ℹ {w}</div>
+            ))}
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

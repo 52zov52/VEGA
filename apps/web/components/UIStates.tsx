@@ -36,7 +36,7 @@ export function PipelineState() {
   return (
     <div className="pipeline-state">
       <div className="pipeline-steps">
-        {["Спутник", "Очистка", "Ряд", "ML", "Аномалия", "Объяснение"].map((step, i) => (
+        {["Спутник", "Очистка", "Ряд", "ML", "Аномалия", "Объяснение"].map((step) => (
           <div key={step} className="pipeline-step">
             <div className="pipeline-dot active" />
             <span>{step}</span>

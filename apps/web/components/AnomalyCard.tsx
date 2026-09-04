@@ -23,6 +23,12 @@ function strengthColor(strength: string): string {
   return "var(--text-muted)";
 }
 
+function strengthLabel(strength: string): string {
+  if (strength === "strong") return "сильный сигнал";
+  if (strength === "moderate") return "умеренный сигнал";
+  return "слабый сигнал";
+}
+
 function FactorBar({ factor }: { factor: Factor }) {
   const abs = Math.min(100, Math.abs(factor.delta_pct));
   const sign = factor.delta_pct > 0 ? "+" : "";
@@ -36,8 +42,7 @@ function FactorBar({ factor }: { factor: Factor }) {
           {sign}{factor.delta_pct}%
         </span>
         <span className="factor-strength" style={{ color: strengthColor(factor.strength) }}>
-          {factor.strength === "strong" ? "сильный сигнал" :
-           factor.strength === "moderate" ? "умеренный сигнал" : "слабый сигнал"}
+          {strengthLabel(factor.strength)}
         </span>
       </div>
       <div className="factor-bar-track">
@@ -53,21 +58,22 @@ function FactorBar({ factor }: { factor: Factor }) {
   );
 }
 
+const LEVEL_LABELS: Record<string, { label: string; color: string }> = {
+  critical: { label: "Критическая аномалия", color: "var(--accent-critical)" },
+  stress: { label: "Стресс вегетации", color: "var(--accent-warning)" },
+  watch: { label: "Снижение биомассы", color: "var(--accent-info)" },
+  normal: { label: "Норма", color: "var(--accent-vegetation)" },
+};
+
 export default function AnomalyCard({ explanation }: { explanation: Explanation }) {
   if (!explanation) return null;
 
-  const levelMeta: Record<string, { label: string; color: string }> = {
-    critical: { label: "Critical anomaly", color: "var(--accent-critical)" },
-    stress: { label: "Vegetation stress", color: "var(--accent-warning)" },
-    watch: { label: "Biomass decline", color: "var(--accent-info)" },
-    normal: { label: "Normal", color: "var(--accent-vegetation)" },
-  };
-  const level = levelMeta[explanation.level || "normal"] || levelMeta.normal;
+  const level = LEVEL_LABELS[explanation.level || "normal"] || LEVEL_LABELS.normal;
 
   return (
     <div className="anomaly-card">
       <div className="anomaly-header">
-        <span className="anomaly-title">Why is this anomaly?</span>
+        <span className="anomaly-title">Почему это аномалия?</span>
         <span className="anomaly-badge" style={{ background: level.color, color: "#000" }}>
           {level.label}
         </span>
@@ -92,11 +98,11 @@ export default function AnomalyCard({ explanation }: { explanation: Explanation 
 
       <div className="anomaly-conclusion">
         <div className="anomaly-cause">
-          <span className="anomaly-cause-label">Conclusion</span>
+          <span className="anomaly-cause-label">Вывод</span>
           <span className="anomaly-cause-value">{explanation.likely_cause}</span>
         </div>
         <div className="anomaly-confidence">
-          <span className="anomaly-cause-label">Confidence</span>
+          <span className="anomaly-cause-label">Уверенность</span>
           <span className="anomaly-confidence-value">
             {Math.round((explanation.confidence || 0) * 100)}%
           </span>
