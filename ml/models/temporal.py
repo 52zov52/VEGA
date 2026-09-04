@@ -27,6 +27,9 @@ class TemporalModel:
         return feat[self.cols].fillna(0).to_numpy(dtype=float)
 
     def fit(self, feat: pd.DataFrame, y: pd.Series) -> "TemporalModel":
+        y = pd.Series(y, index=feat.index)
+        mask = y.notna().to_numpy()
+        feat, y = feat.iloc[mask], y.iloc[mask]
         X = self._window_matrix(feat)
         try:
             import torch

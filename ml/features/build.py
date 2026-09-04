@@ -16,13 +16,13 @@ import pandas as pd
 
 from ml.data.contract import TARGET_COL
 
-LAG_STEPS = [1, 2, 3, 7, 14, 30, 60]
-ROLL_WINDOWS = [7, 14, 30, 60]
+LAG_STEPS = [1, 2, 3, 7, 14, 30, 60, 90]
+ROLL_WINDOWS = [7, 14, 30, 60, 90]
 
 CROP_CATS = ["озимая пшеница", "подсолнечник", "пастбища/зерновые", "зерновые", "unknown"]
 
 FEATURE_COLS: list[str] = []
-FEATURES_VERSION = "v18"
+FEATURES_VERSION = "v20"
 
 
 def _resolve(df: pd.DataFrame, names: list[str], default: float = 0.0) -> pd.Series:
@@ -53,14 +53,38 @@ def _build_frame(df: pd.DataFrame, clim=None) -> pd.DataFrame:
     prefilled = prefilled.ffill().bfill().fillna(0.5)
     out["_pre"] = prefilled
 
-    # Sparsity-индикаторы строго по прошлому.
-    out["days_since_obs"] = groups.apply(
-        lambda g: ((g["date"] - g["date"].where(g[TARGET_COL].notna()).ffill()).dt.days),
-        include_groups=False,
-    ).reset_index(level=0, drop=True).fillna(365).clip(upper=365).astype(float)
+    # Пространственный контекст: same-day среднее известных соседей.
+    # Скрытые значения — NaN и в суммах не участвуют; собственный target
+    # исключён, чтобы не было self-leak. Это настоящее (не будущее).
+    date_sum = groups_date_sum = out.groupby("date")[TARGET_COL].transform(lambda s: s.fillna(0.0).sum())
+    date_cnt = out.groupby("date")[TARGET_COL].transform("count").astype(float)
+    own = raw.fillna(0.0)
+    own_known = known.astype(float)
+    den = (date_cnt - own_known).clip(lower=0)
+    fallback_spatial = float(raw.median()) if raw.notna().any() else 0.4
+    out["spatial_mean"] = ((date_sum - own * own_known) / den.replace(0, np.nan)).fillna(fallback_spatial)
+
+    # Sparsity-индикаторы строго по прошлому (векторизованно, без apply).
+    last_obs = out["date"].where(out[TARGET_COL].notna())
+    last_obs = last_obs.groupby(out["polygon_id"]).ffill()
+    out["days_since_obs"] = ((out["date"] - last_obs).dt.days
+                             .fillna(365).clip(upper=365).astype(float))
     out["avail_ratio_30"] = groups[TARGET_COL].transform(
         lambda s: s.notna().astype(float).shift(1).rolling(30, min_periods=1).mean()
     ).fillna(0.0)
+    # Будущий сосед: дней до следующего известного (симметрия интерполяции).
+    next_obs = out["date"].where(known).groupby(out["polygon_id"]).bfill()
+    out["dist_fut"] = ((next_obs - out["date"]).dt.days.fillna(365).clip(upper=365).astype(float))
+    # Сенсорный источник соседних наблюдений (bias s2/landsat/modis).
+    # Прошлое — ffill, будущее — bfill по флагам доступности в известные дни.
+    for short, col in (("s2", "s2_ndvi"), ("ls", "landsat_ndvi"), ("mod", "modis_ndvi")):
+        if col in out.columns:
+            flag = (out[col].notna() & known).astype(float)
+            out[f"src_past_{short}"] = flag.groupby(out["polygon_id"]).ffill().fillna(0.0)
+            out[f"src_fut_{short}"] = flag.groupby(out["polygon_id"]).bfill().fillna(0.0)
+        else:
+            out[f"src_past_{short}"] = 0.0
+            out[f"src_fut_{short}"] = 0.0
 
     # Лаги предзаполненного ряда (прошлое) + rolling по сдвинутому на 1.
     gp = out.groupby("polygon_id", sort=False)["_pre"]
@@ -101,6 +125,11 @@ def _build_frame(df: pd.DataFrame, clim=None) -> pd.DataFrame:
     else:
         out["past_clim_mean"] = np.nan
         out["past_clim_std"] = np.nan
+    # Same-day интерполированное значение (двусторонняя линейная по известным).
+    # Легитимный контекст восстановления (как linear baseline): скрытые
+    # значения в интерполяции не участвуют. Главный точечный prior для GBM.
+    out["interp_now"] = out["_pre"]
+    out["interp_clim_resid"] = out["interp_now"] - out["past_clim_mean"].fillna(out["interp_now"])
 
     # Качество/спектр demo-схемы, если есть; иначе нейтральные значения.
     for col in ("evi", "ndwi", "humidity", "radiation", "cloud_fraction", "data_quality"):
@@ -145,7 +174,10 @@ def build_features(df: pd.DataFrame, clim=None) -> tuple[pd.DataFrame, list[str]
            "slope_30", "lag_avail", "days_since_obs", "avail_ratio_30"]
         + ["doy", "week", "month", "year", "sin_day", "cos_day"]
         + ["temp_mean_7", "temp_mean_30", "precip_sum_7", "precip_sum_30"]
-        + ["past_clim_mean", "past_clim_std"]
+        + ["past_clim_mean", "past_clim_std", "spatial_mean"]
+        + ["interp_now", "interp_clim_resid", "dist_fut"]
+        + ["src_past_s2", "src_past_ls", "src_past_mod",
+           "src_fut_s2", "src_fut_ls", "src_fut_mod"]
         + ["evi", "ndwi", "humidity", "radiation", "cloud_fraction", "data_quality"]
         + [f"crop_{c}" for c in CROP_CATS]
         + ["polygon_freq", "polygon_bucket"]

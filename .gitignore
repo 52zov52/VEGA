@@ -10,6 +10,9 @@ dist/
 models/*.bin
 models/*.pt
 models/*.cbm
+models/*.joblib
+models/meta.json
+catboost_info/
 data/raw/
 data/cache/
 data/*.csv

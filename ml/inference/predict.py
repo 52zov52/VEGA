@@ -15,7 +15,7 @@ import pandas as pd
 
 from ml.data.contract import TARGET_COL
 from ml.features.build import build_features
-from ml.models.baselines import baseline_linear, baseline_seasonal
+from ml.models.baselines import baseline_seasonal
 from ml.models.ensemble import EnsembleWeights, ensemble_predict
 
 
@@ -56,16 +56,15 @@ def predict_gaps(df: pd.DataFrame, artifacts: dict, clim=None) -> pd.Series:
     # Past-only климатология по истинно известным (NaN пропусков не участвуют).
     if clim is None:
         clim = PastClimatology().fit(work)
-    # Преднаполнение прошлым: линейная интерполяция для стабильных лагов.
-    prefilled = work.copy()
-    prefilled[TARGET_COL] = prefilled.groupby("polygon_id")[TARGET_COL].transform(baseline_linear)
-    feat, cols = build_features(prefilled, clim=clim)
+    # build_features сам предзаполняет ряд для лагов; sparsity/spatial
+    # считаются по сырым NaN, поэтому сюда передаём work как есть.
+    feat, cols = build_features(work, clim=clim)
     feat_cols = artifacts.get("feature_cols") or cols
     feat_cols = [c for c in feat_cols if c in feat.columns]
     X = feat[feat_cols]
     p_gbm = np.asarray(artifacts["gbm"].predict(X), dtype=float)
     p_tmp = np.asarray(artifacts["temporal"].predict(feat), dtype=float)
-    p_sea = baseline_seasonal(prefilled).to_numpy(dtype=float)
+    p_sea = baseline_seasonal(work).to_numpy(dtype=float)
     ens = ensemble_predict(p_gbm, p_tmp, p_sea, artifacts.get("weights"))
     out = work[TARGET_COL].astype(float)
     out.loc[mask] = pd.Series(ens, index=work.index).loc[mask]

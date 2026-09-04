@@ -4,8 +4,13 @@
 Первые два используются при наличии в окружении; в Docker/community-сборке
 гарантированно работает sklearn-бэкенд без GPU и без сети. Интерфейс един:
 fit(X, y) / predict(X) / used_backend.
+
+Переменная VEGA_GBM_BACKEND=sklearn принудительно выбирает sklearn
+(для абляций и воспроизводимости).
 """
 from __future__ import annotations
+
+import os
 
 import numpy as np
 import pandas as pd
@@ -19,40 +24,58 @@ class GBMModel:
         self.model = None
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "GBMModel":
+        mask = pd.Series(y).notna().to_numpy()
+        X, y = X.iloc[mask].reset_index(drop=True) if hasattr(X, "iloc") else X, pd.Series(y).iloc[mask].reset_index(drop=True)
         Xn = X.fillna(X.median(numeric_only=True)).fillna(0)
+        backend = os.getenv("VEGA_GBM_BACKEND", "").lower()
+        force_sklearn = backend == "sklearn"
+        skip_catboost = backend == "lightgbm"
         # 1. CatBoost
-        try:
-            from catboost import CatBoostRegressor
+        if not force_sklearn and not skip_catboost:
+            try:
+                from catboost import CatBoostRegressor
 
-            self.model = CatBoostRegressor(
-                iterations=600, depth=6, learning_rate=0.05,
-                loss_function="RMSE", random_seed=self.seed, verbose=False,
-            )
-            self.model.fit(Xn, y)
-            self.used_backend = "catboost"
-            return self
-        except Exception:
-            pass
-        # 2. LightGBM
-        try:
-            from lightgbm import LGBMRegressor
+                self.model = CatBoostRegressor(
+                    iterations=1500, depth=6, learning_rate=0.03,
+                    loss_function="RMSE", random_seed=self.seed, verbose=False,
+                    early_stopping_rounds=100,
+                )
+                n = len(Xn)
+                cut = max(int(n * 0.9), n - 5000)
+                self.model.fit(Xn.iloc[:cut], y.iloc[:cut], eval_set=(Xn.iloc[cut:], y.iloc[cut:]))
+                self.used_backend = "catboost"
+                return self
+            except Exception:
+                pass
+        # 2. LightGBM c time-ordered early stopping (последние 10% — свежие даты).
+        if not force_sklearn:
+            try:
+                import lightgbm as lgb
+                from lightgbm import LGBMRegressor
 
-            self.model = LGBMRegressor(
-                n_estimators=600, max_depth=-1, num_leaves=63,
-                learning_rate=0.05, subsample=0.9, colsample_bytree=0.8,
-                random_state=self.seed, verbose=-1,
-            )
-            self.model.fit(Xn, y)
-            self.used_backend = "lightgbm"
-            return self
-        except Exception:
-            pass
+                self.model = LGBMRegressor(
+                    n_estimators=5000, num_leaves=31,
+                    learning_rate=0.02, subsample=0.85, colsample_bytree=0.7,
+                    min_child_samples=100, reg_lambda=5.0,
+                    random_state=self.seed, verbose=-1,
+                )
+                n = len(Xn)
+                cut = max(int(n * 0.9), n - 5000)
+                self.model.fit(
+                    Xn.iloc[:cut], y.iloc[:cut],
+                    eval_X=Xn.iloc[cut:], eval_y=y.iloc[cut:],
+                    callbacks=[lgb.early_stopping(150, verbose=False)],
+                )
+                self.used_backend = "lightgbm"
+                return self
+            except Exception:
+                pass
         # 3. sklearn — всегда доступен
         from sklearn.ensemble import HistGradientBoostingRegressor
 
         self.model = HistGradientBoostingRegressor(
-            max_iter=400, max_depth=8, learning_rate=0.06,
-            l2_regularization=1.0, random_state=self.seed,
+            max_iter=800, max_depth=10, learning_rate=0.04,
+            l2_regularization=2.0, early_stopping="auto", random_state=self.seed,
         )
         self.model.fit(Xn, y)
         self.used_backend = "sklearn-hgb"

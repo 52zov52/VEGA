@@ -35,7 +35,8 @@ from ml.evaluation.splits import time_forward_splits  # noqa: E402
 from ml.features.build import FEATURES_VERSION, build_features  # noqa: E402
 from ml.models.baselines import baseline_linear, baseline_nearest, baseline_seasonal  # noqa: E402
 from ml.models.ensemble import EnsembleWeights, ensemble_predict, grid_search_weights  # noqa: E402
-from ml.models.gbm import GBMModel  # noqa: E402
+from ml.models.gbm import GBMModel  # noqa: E402 (бэкенд внутри ResidualGBM)
+from ml.models.residual import ResidualGBM  # noqa: E402
 from ml.models.temporal import TemporalModel  # noqa: E402
 from services.climatology.climatology import PastClimatology  # noqa: E402
 
@@ -101,6 +102,37 @@ def load_frame(path: str | None, fallback_demo: bool = True) -> tuple[pd.DataFra
     return pd.DataFrame(), "empty"
 
 
+def fit_rows_from_masked(
+    masked: pd.DataFrame, source_known: pd.DataFrame, feat: pd.DataFrame, cols: list[str]
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Строки синтетических gaps + их истинные значения (self-supervised fit §11)."""
+    sel = masked["is_synthetic_gap"].to_numpy()
+    key = masked[sel].set_index(["polygon_id", "date"]).index
+    y = source_known.set_index(["polygon_id", "date"])[TARGET_COL].loc[key]
+    y.index = feat[sel].index
+    return feat[sel][cols], y.astype(float)
+
+
+def make_fit_set(
+    known_df: pd.DataFrame, clim_fit: PastClimatology, seed: int
+) -> tuple[pd.DataFrame, pd.Series, list[str]]:
+    """ train-known -> маски 1d/3d -> фичи -> (X_fit, y_fit) по скрытым точкам."""
+    parts_X: list[pd.DataFrame] = []
+    parts_y: list[pd.Series] = []
+    cols: list[str] = []
+    for gap_len, n_gaps, s in ((1, 100, seed), (3, 40, seed + 1)):
+        masked = mask_random_gaps(known_df, gap_len=gap_len, n_gaps=n_gaps, seed=s)
+        if not masked["is_synthetic_gap"].any():
+            continue
+        feat, cols = build_features(masked, clim=clim_fit)
+        Xp, yp = fit_rows_from_masked(masked, known_df, feat, cols)
+        parts_X.append(Xp)
+        parts_y.append(yp)
+    X_fit = pd.concat(parts_X, ignore_index=True) if parts_X else pd.DataFrame()
+    y_fit = pd.concat(parts_y, ignore_index=True) if parts_y else pd.Series(dtype=float)
+    return X_fit, y_fit, cols
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", default=None)
@@ -123,24 +155,24 @@ def main() -> None:
             print(f"LEAKAGE WARNING: {issue}")
 
     # Валидация на последнем (самом полном) фолде.
+    # Self-supervised fit (§11): модели учатся на синтетических gaps внутри
+    # train — там, где interp_now является настоящей интерполяцией, а не тождеством.
     train_df, valid_df = splits[-1]
     clim_train = PastClimatology().fit(train_df)
-    feat_tr, cols = build_features(train_df, clim=clim_train)
+    X_fit, y_fit, cols = make_fit_set(train_df, clim_train, SEED)
     for bad in check_no_future_features(cols):
         print(f"LEAKAGE FEATURE: {bad}")
         raise SystemExit(1)
-    y_tr = feat_tr[TARGET_COL].astype(float)
-    X_tr = feat_tr[cols]
-    print(f"features {FEATURES_VERSION}: {len(cols)} cols, train={len(X_tr)}")
+    print(f"features {FEATURES_VERSION}: {len(cols)} cols, fit_gaps={len(X_fit)}")
 
-    gbm = GBMModel(seed=SEED).fit(X_tr, y_tr)
-    temporal = TemporalModel(seed=SEED).fit(feat_tr, y_tr)
+    gbm = ResidualGBM(seed=SEED).fit(X_fit, y_fit)
+    temporal = TemporalModel(seed=SEED).fit(X_fit, y_fit)
     print(f"backends: gbm={gbm.used_backend} temporal={temporal.used_backend}", flush=True)
 
-    # Подбор весов на validation gaps 3 дня (ближе к структуре скрытого теста).
+    # Подбор весов на validation gaps 1 день (структура скрытого теста: 85% одиночных).
     from ml.inference.predict import predict_gaps as _pg
 
-    masked_w = mask_random_gaps(valid_df, gap_len=3, n_gaps=30, seed=SEED)
+    masked_w = mask_random_gaps(valid_df, gap_len=1, n_gaps=30, seed=SEED)
     y_w = _truth_at(valid_df, masked_w)
     base = {"gbm": gbm, "temporal": temporal, "feature_cols": cols}
     p_gbm_w = _pg(masked_w, {**base, "weights": EnsembleWeights(1, 0, 0)}, clim=clim_train).loc[
@@ -153,7 +185,7 @@ def main() -> None:
     p_sea_w = np.asarray(sea_w, dtype=float)
     weights = grid_search_weights(y_w, p_gbm_w, p_tmp_w, p_sea_w)
     print(f"weights: gbm={weights.w_gbm:.2f} temporal={weights.w_temporal:.2f} seasonal={weights.w_seasonal:.2f}")
-    print(f"valid 3d RMSE: gbm={rmse(y_w, p_gbm_w):.4f} tmp={rmse(y_w, p_tmp_w):.4f} "
+    print(f"valid 1d RMSE: gbm={rmse(y_w, p_gbm_w):.4f} tmp={rmse(y_w, p_tmp_w):.4f} "
           f"sea={rmse(y_w, p_sea_w):.4f} ens={rmse(y_w, ensemble_predict(p_gbm_w, p_tmp_w, p_sea_w, weights)):.4f} "
           f"gap_score={gap_score(rmse(y_w, ensemble_predict(p_gbm_w, p_tmp_w, p_sea_w, weights)))}")
 
@@ -173,9 +205,9 @@ def main() -> None:
             ["polygon_id", "date"], keep="last").sort_values(["polygon_id", "date"]).reset_index(drop=True)
         print(f"final fit: +{len(extra_known)} extra-known rows -> {len(final_df)}")
     clim_final = PastClimatology().fit(final_df)
-    feat_f, cols_f = build_features(final_df, clim=clim_final)
-    gbm_f = GBMModel(seed=SEED).fit(feat_f[cols_f], feat_f[TARGET_COL].astype(float))
-    temporal_f = TemporalModel(seed=SEED).fit(feat_f, feat_f[TARGET_COL].astype(float))
+    X_fin, y_fin, cols_f = make_fit_set(final_df, clim_final, SEED + 7)
+    gbm_f = ResidualGBM(seed=SEED).fit(X_fin, y_fin)
+    temporal_f = TemporalModel(seed=SEED).fit(X_fin, y_fin)
 
     import joblib
 
@@ -186,7 +218,8 @@ def main() -> None:
         "seed": SEED, "dataset_version": DATASET_VERSION, "features": FEATURES_VERSION,
         "model": f"ensemble({gbm_f.used_backend}+{temporal_f.used_backend}+seasonal)",
         "split": "time_forward", "weights": vars(weights.normalized()),
-        "score_valid_3d": final_rmse, "gap_score_valid_3d": gap_score(final_rmse),
+        "feature_cols": cols_f,
+        "score_valid_1d": final_rmse, "gap_score_valid_1d": gap_score(final_rmse),
         "train_time_s": round(time.time() - t0, 1),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     exp_dir = ROOT / "experiments"

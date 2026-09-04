@@ -50,7 +50,13 @@ def main() -> None:
         "anon_polygon_id": test["polygon_id"],
         "date": pd.to_datetime(test["date"]).dt.strftime("%Y-%m-%d"),
         "primary_ndvi_pred": filled.round(6),
-    }).drop_duplicates(["anon_polygon_id", "date"]).sort_values(["anon_polygon_id", "date"])
+        "_gap": test["is_synthetic_gap"] if "is_synthetic_gap" in test.columns else True,
+    })
+    # Скоринговая выборка — строки с флагом скрытых точек; без флага — все строки.
+    if "is_synthetic_gap" in test.columns:
+        sub = sub[sub["_gap"] == True]  # noqa: E712 — флаг из CSV
+    sub = sub.drop(columns=["_gap"]).drop_duplicates(["anon_polygon_id", "date"]).sort_values(
+        ["anon_polygon_id", "date"])
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     sub.to_csv(args.out, index=False)
     print(f"submission: {len(sub)} rows -> {args.out}")
