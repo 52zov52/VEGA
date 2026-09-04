@@ -116,6 +116,25 @@ export default function Page() {
     } catch { setError("Не удалось удалить полигон."); }
   }
 
+  // Анализ из попапа на глобусе
+  async function handleAnalyzeField(pid: string) {
+    setFieldId(pid);
+    const field = fields.find((f) => f.id === pid);
+    setSelectedField(field || null);
+    setGlobeFlyTo((n) => n + 1);
+    setLoading(true); setError(null);
+    try {
+      const full = await fetchAnalysis(pid);
+      setAnalysis(full);
+      setTs(full.ts);
+      setModalOpen(true);
+    } catch (err: any) {
+      setError(`Анализ недоступен: ${err.message}.`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // График
   useEffect(() => {
     if (!chartRef.current || !ts.length) return;
@@ -247,14 +266,6 @@ export default function Page() {
           <span className="header-title">VEGA</span>
           <span className="header-sub">Мониторинг вегетации</span>
         </div>
-        <div className="header-actions">
-          <button className="btn-secondary" onClick={() => runAnalyze(true)} disabled={loading}>
-            Демо
-          </button>
-          <button className="btn-primary" onClick={() => runAnalyze(false)} disabled={loading || !fieldId}>
-            {loading ? "Анализ…" : "Анализ поля"}
-          </button>
-        </div>
       </header>
 
       {/* Layout: sidebar + globe (без правой панели) */}
@@ -372,21 +383,13 @@ export default function Page() {
             fields={fields}
             selectedId={fieldId}
             onSelect={handleFieldSelect}
+            onAnalyze={handleAnalyzeField}
             regionCenter={REGION_COORDS[regionId] || [47.2, 39.7]}
             flyToTrigger={globeFlyTo}
           />
           {drawMode && (
             <div className="draw-overlay">
               ✏ Кликните {Math.max(0, 3 - vertices.length)}+ точек на карте
-            </div>
-          )}
-          {/* Мини-бар выбранного поля */}
-          {selectedField && !modalOpen && (
-            <div className="selected-bar" onClick={() => setModalOpen(true)}>
-              <span className="selected-bar-id">{selectedField.id}</span>
-              <span className="selected-bar-crop">{getCropRu(selectedField.crop)}</span>
-              <span className="selected-bar-area">{selectedField.area_ha} га</span>
-              <span className="selected-bar-hint">Нажмите для анализа →</span>
             </div>
           )}
         </main>

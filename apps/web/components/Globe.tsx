@@ -15,45 +15,46 @@ type Props = {
   fields: Field[];
   selectedId: string;
   onSelect: (id: string) => void;
+  onAnalyze: (id: string) => void;
   regionCenter?: [number, number];
   flyToTrigger?: number;
 };
 
 const LEVEL_COLOR: Record<string, string> = {
-  critical: "#e05c5c",
-  stress: "#e0a83c",
-  watch: "#6aa9c4",
-  normal: "#7cc46a",
+  critical: "#f44336",
+  stress: "#ff9800",
+  watch: "#29b6f6",
+  normal: "#4caf50",
 };
 
-// Русские названия культур
 const CROP_RU: Record<string, string> = {
-  "winter wheat": "озимая пшеница",
-  "пшеница": "озимая пшеница",
-  "sunflower": "подсолнечник",
-  "подсолнечник": "подсолнечник",
-  "grain": "зерновые",
-  "зерновые": "зерновые",
-  "pasture": "пастбища",
-  "пастбища": "пастбища",
-  "corn": "кукуруза",
-  "кукуруза": "кукуруза",
-  "soybean": "соя",
-  "соя": "соя",
+  "winter wheat": "Озимая пшеница",
+  "пшеница": "Озимая пшеница",
+  "sunflower": "Подсолнечник",
+  "подсолнечник": "Подсолнечник",
+  "grain": "Зерновые",
+  "зерновые": "Зерновые",
+  "pasture": "Пастбища",
+  "пастбища": "Пастбища",
+  "corn": "Кукуруза",
+  "кукуруза": "Кукуруза",
+  "soybean": "Соя",
+  "соя": "Соя",
 };
 
 function getCropRu(crop: string): string {
   if (!crop) return "—";
-  const lower = crop.toLowerCase();
-  return CROP_RU[lower] || crop;
+  return CROP_RU[crop.toLowerCase()] || crop;
 }
 
 export { getCropRu };
 
-export default function Globe({ fields, selectedId, onSelect, regionCenter, flyToTrigger }: Props) {
+export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger }: Props) {
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
+  const [hoveredField, setHoveredField] = useState<string | null>(null);
+  const [popupField, setPopupField] = useState<Field | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,22 +81,25 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
 
   const polyCapColor = useCallback((d: any) => {
     const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}33`;
+    return `${c}22`;
   }, []);
 
   const polySideColor = useCallback((d: any) => {
     const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}55`;
+    return `${c}44`;
   }, []);
 
-  // Точки — маленькие, точные
-  const pointData = fields
+  // HTML-элементы (пины)
+  const pinData = fields
     .filter((f) => f.center)
     .map((f) => ({
       id: f.id,
       lat: f.center[0],
       lng: f.center[1],
+      crop: f.crop,
+      area_ha: f.area_ha,
       isSelected: f.id === selectedId,
+      isHovered: f.id === hoveredField,
     }));
 
   // Летим к полю
@@ -145,15 +149,41 @@ export default function Globe({ fields, selectedId, onSelect, regionCenter, flyT
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
-        // Маленькие точки
-        pointsData={pointData}
-        pointLat="lat"
-        pointLng="lng"
-        pointColor={(d: any) => d.isSelected ? "#ffffff" : "#4caf50"}
-        pointAltitude={(d: any) => d.isSelected ? 0.003 : 0.001}
-        pointRadius={(d: any) => d.isSelected ? 0.02 : 0.012}
-        pointsMerge={false}
-        onPointClick={(d: any) => onSelect(d.id)}
+        // HTML-пины
+        htmlElementsData={pinData}
+        htmlLat="lat"
+        htmlLng="lng"
+        htmlAltitude={0.005}
+        htmlElement={(d: any) => {
+          const el = document.createElement("div");
+          el.className = "globe-pin";
+          el.innerHTML = `
+            <div class="globe-pin-marker ${d.isSelected ? "selected" : ""} ${d.isHovered ? "hovered" : ""}">
+              <svg width="24" height="34" viewBox="0 0 24 34" fill="none">
+                <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 22 12 22s12-13 12-22C24 5.4 18.6 0 12 0z" fill="${d.isSelected ? "#ffffff" : "#4caf50"}"/>
+                <circle cx="12" cy="11" r="5" fill="${d.isSelected ? "#4caf50" : "#000000"}" opacity="0.9"/>
+              </svg>
+            </div>
+            ${d.isSelected ? `
+              <div class="globe-popup">
+                <div class="globe-popup-id">${d.id}</div>
+                <div class="globe-popup-crop">${getCropRu(d.crop)}</div>
+                <div class="globe-popup-area">${d.area_ha} га</div>
+                <button class="globe-popup-btn" data-action="analyze" data-id="${d.id}">Анализ поля</button>
+              </div>
+            ` : ""}
+          `;
+          // Обработчики
+          el.querySelector(".globe-pin-marker")?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            onSelect(d.id);
+          });
+          el.querySelector("[data-action='analyze']")?.addEventListener("click", (e) => {
+            e.stopPropagation();
+            onAnalyze(d.id);
+          });
+          return el;
+        }}
         // Контролы
         controlGlobe={false}
         animateIn={true}
