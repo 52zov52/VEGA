@@ -653,58 +653,35 @@ button, .btn-primary, .btn-secondary, .btn-ghost {
   .sidebar { display: none; }
 }
 
-/* ─── Globe Pins (Google Maps style) ─── */
-.globe-pin {
-  position: relative;
-  cursor: pointer;
-  transform: translate(-12px, -30px);
-  transition: transform 0.15s;
-}
-.globe-pin:hover {
-  transform: translate(-12px, -32px) scale(1.1);
-}
-.globe-pin-marker {
-  position: relative;
-  z-index: 2;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-  transition: filter 0.15s;
-}
-.globe-pin-marker:hover {
-  filter: drop-shadow(0 3px 8px rgba(0,0,0,0.7));
-}
-.globe-pin-marker.selected {
-  filter: drop-shadow(0 0 10px rgba(76,175,80,0.5));
+/* ─── Globe Popup (HTML overlay, NOT inside WebGL) ─── */
+.globe-popup-overlay {
+  position: absolute;
+  z-index: 100;
+  pointer-events: auto;
+  transform: translate(-50%, -100%);
+  margin-top: -12px;
 }
 .globe-popup {
-  position: absolute;
-  bottom: 38px;
-  left: 50%;
-  transform: translateX(-50%);
   background: #0a0a0a;
   border: 1px solid #333;
   border-radius: 10px;
   padding: 10px 14px;
   min-width: 140px;
-  z-index: 10;
   box-shadow: 0 8px 24px rgba(0,0,0,0.8);
   animation: popupIn 0.15s ease;
-  pointer-events: auto;
 }
-.globe-popup::after {
-  content: "";
-  position: absolute;
-  bottom: -6px;
-  left: 50%;
-  transform: translateX(-50%) rotate(45deg);
+.globe-popup-arrow {
   width: 10px;
   height: 10px;
   background: #0a0a0a;
   border-right: 1px solid #333;
   border-bottom: 1px solid #333;
+  transform: rotate(45deg);
+  margin: -5px auto 0;
 }
 @keyframes popupIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from { opacity: 0; transform: translate(-50%, -100%) translateY(4px); }
+  to { opacity: 1; transform: translate(-50%, -100%) translateY(0); }
 }
 .globe-popup-id {
   font-family: var(--font-mono);

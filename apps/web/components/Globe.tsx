@@ -49,13 +49,14 @@ function getCropRu(crop: string): string {
 
 export { getCropRu };
 
+type PopupPos = { x: number; y: number; field: Field };
+
 export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger }: Props) {
   const globeRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
-  const [hoveredField, setHoveredField] = useState<string | null>(null);
-  const [popupField, setPopupField] = useState<Field | null>(null);
-  const [, setRenderTick] = useState(0); // принудительный re-render при вращении
+  const [popup, setPopup] = useState<PopupPos | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,8 +91,8 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     return `${c}44`;
   }, []);
 
-  // HTML-элементы (пины)
-  const pinData = fields
+  // WebGL-точки (идеальная синхронизация)
+  const pointData = fields
     .filter((f) => f.center)
     .map((f) => ({
       id: f.id,
@@ -100,8 +101,31 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
       crop: f.crop,
       area_ha: f.area_ha,
       isSelected: f.id === selectedId,
-      isHovered: f.id === hoveredField,
     }));
+
+  // Клик по WebGL-точке → показать HTML-попап
+  function handlePointClick(d: any) {
+    onSelect(d.id);
+    // Получаем экранные координаты
+    if (globeRef.current) {
+      const coords = globeRef.current.getScreenCoords(d.lat, d.lng);
+      if (coords) {
+        const field = fields.find((f) => f.id === d.id);
+        if (field) {
+          setPopup({ x: coords.x, y: coords.y, field });
+        }
+      }
+    }
+  }
+
+  // Закрыть попап при клике на пустое место
+  useEffect(() => {
+    function closePopup() { setPopup(null); }
+    const container = containerRef.current;
+    if (!container) return;
+    container.addEventListener("click", closePopup);
+    return () => container.removeEventListener("click", closePopup);
+  }, []);
 
   // Летим к полю
   useEffect(() => {
@@ -120,6 +144,27 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     globeRef.current.pointOfView({ lat, lng, altitude: 0.9 }, 1000);
   }, [regionCenter]);
 
+  // Обновлять позицию попапа при вращении
+  useEffect(() => {
+    if (!popup || !globeRef.current) return;
+    function updatePos() {
+      if (!popup || !globeRef.current || !globeRef.current.getScreenCoords) return;
+      const coords = globeRef.current.getScreenCoords(popup.field.center[0], popup.field.center[1]);
+      if (coords) {
+        setPopup((prev) => prev ? { ...prev, x: coords.x, y: coords.y } : null);
+      }
+    }
+    const globe = globeRef.current;
+    globe?.addEventListener?.("globe-rotate", updatePos);
+    // Also poll during animation
+    const iv = setInterval(updatePos, 50);
+    setTimeout(() => clearInterval(iv), 2000);
+    return () => {
+      globe?.removeEventListener?.("globe-rotate", updatePos);
+      clearInterval(iv);
+    };
+  }, [popup?.field?.id]);
+
   if (!ready || !GlobeComp) {
     return (
       <div className="globe-loading">
@@ -130,7 +175,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   }
 
   return (
-    <div className="globe-container">
+    <div className="globe-container" ref={containerRef}>
       <GlobeComp
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
@@ -150,50 +195,43 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
-        // HTML-пины
-        htmlElementsData={pinData}
-        htmlLat="lat"
-        htmlLng="lng"
-        htmlAltitude={0.005}
-        htmlElement={(d: any) => {
-          const el = document.createElement("div");
-          el.className = "globe-pin";
-          el.innerHTML = `
-            <div class="globe-pin-marker ${d.isSelected ? "selected" : ""} ${d.isHovered ? "hovered" : ""}">
-              <svg width="24" height="34" viewBox="0 0 24 34" fill="none">
-                <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 22 12 22s12-13 12-22C24 5.4 18.6 0 12 0z" fill="${d.isSelected ? "#ffffff" : "#4caf50"}"/>
-                <circle cx="12" cy="11" r="5" fill="${d.isSelected ? "#4caf50" : "#000000"}" opacity="0.9"/>
-              </svg>
-            </div>
-            ${d.isSelected ? `
-              <div class="globe-popup">
-                <div class="globe-popup-id">${d.id}</div>
-                <div class="globe-popup-crop">${getCropRu(d.crop)}</div>
-                <div class="globe-popup-area">${d.area_ha} га</div>
-                <button class="globe-popup-btn" data-action="analyze" data-id="${d.id}">Анализ поля</button>
-              </div>
-            ` : ""}
-          `;
-          // Обработчики
-          el.querySelector(".globe-pin-marker")?.addEventListener("click", (e) => {
-            e.stopPropagation();
-            onSelect(d.id);
-          });
-          el.querySelector("[data-action='analyze']")?.addEventListener("click", (e) => {
-            e.stopPropagation();
-            onAnalyze(d.id);
-          });
-          return el;
-        }}
+        // WebGL-точки
+        pointsData={pointData}
+        pointLat="lat"
+        pointLng="lng"
+        pointColor={(d: any) => d.isSelected ? "#ffffff" : "#4caf50"}
+        pointAltitude={0.001}
+        pointRadius={(d: any) => d.isSelected ? 0.15 : 0.08}
+        onPointClick={(d: any) => handlePointClick(d)}
         // Контролы
         controlGlobe={false}
         animateIn={true}
-        onGlobeRotate={() => setRenderTick((t) => t + 1)}
-        onGlobeZoom={() => setRenderTick((t) => t + 1)}
         width={undefined}
         height={undefined}
         style={{ width: "100%", height: "100%" }}
       />
+
+      {/* HTML-попап поверх глобуса */}
+      {popup && (
+        <div
+          className="globe-popup-overlay"
+          style={{ left: popup.x, top: popup.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="globe-popup">
+            <div className="globe-popup-id">{popup.field.id}</div>
+            <div className="globe-popup-crop">{getCropRu(popup.field.crop)}</div>
+            <div className="globe-popup-area">{popup.field.area_ha} га</div>
+            <button
+              className="globe-popup-btn"
+              onClick={(e) => { e.stopPropagation(); onAnalyze(popup.field.id); setPopup(null); }}
+            >
+              Анализ поля
+            </button>
+          </div>
+          <div className="globe-popup-arrow" />
+        </div>
+      )}
     </div>
   );
 }
