@@ -169,6 +169,12 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
           mesh.userData = { fieldData: d };
           return mesh;
         }}
+        customThreeObjectUpdate={(obj: any, d: any) => {
+          if (globeRef.current?.getCoords) {
+            const pos = globeRef.current.getCoords(d.lat, d.lng, 0.01);
+            obj.position.set(pos.x, pos.y, pos.z);
+          }
+        }}
         onCustomLayerClick={(obj: any) => {
           const d = obj.userData?.fieldData;
           if (!d) return;
