@@ -55,6 +55,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   const [ready, setReady] = useState(false);
   const [hoveredField, setHoveredField] = useState<string | null>(null);
   const [popupField, setPopupField] = useState<Field | null>(null);
+  const [, setRenderTick] = useState(0); // принудительный re-render при вращении
 
   useEffect(() => {
     let cancelled = false;
@@ -187,6 +188,8 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         // Контролы
         controlGlobe={false}
         animateIn={true}
+        onGlobeRotate={() => setRenderTick((t) => t + 1)}
+        onGlobeZoom={() => setRenderTick((t) => t + 1)}
         width={undefined}
         height={undefined}
         style={{ width: "100%", height: "100%" }}
