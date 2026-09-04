@@ -41,6 +41,9 @@ def main() -> None:
     test["polygon_id"] = test["polygon_id"].astype(str)
     test["date"] = pd.to_datetime(test["date"]).dt.date
     test = normalize_columns(test)
+    # Скрытый тест: target отсутствует полностью или частично — это и восстанавливаем.
+    if TARGET_COL not in test.columns:
+        test[TARGET_COL] = float("nan")
 
     filled = predict_gaps(test, artifacts)
     sub = pd.DataFrame({

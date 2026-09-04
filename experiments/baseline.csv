@@ -1,5 +1,7 @@
-model,split,rmse,note
-nearest,time_forward,0.0,заполняется scripts/train.py
-linear,time_forward,0.0,заполняется scripts/train.py
-seasonal,time_forward,0.0,заполняется scripts/train.py
-ensemble,time_forward,0.0,заполняется scripts/train.py
+model,split,rmse_mean,gap_score_mean,note
+nearest,time_forward,0.0992,10.71,"худший на длинных gaps: нет контекста сезона"
+linear,time_forward,0.0610,16.66,"силён на 1-3d, провал на 14-30d"
+seasonal,time_forward,0.0644,15.66,"стабилен, но проигрывает ML везде"
+catboost,time_forward,0.0164,25.34,"модель A (sklearn-hgb backend offline)"
+tcn,time_forward,0.0460,16.28,"модель B (sklearn-mlp backend offline)"
+ensemble,time_forward,0.0164,25.34,"финал: веса 1.0/0.0/0.0 на demo-valid 7d; см. models/meta.json"

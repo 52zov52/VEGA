@@ -30,7 +30,18 @@ def ensemble_predict(
     weights: EnsembleWeights | None = None,
 ) -> np.ndarray:
     w = (weights or EnsembleWeights()).normalized()
-    out = w.w_gbm * np.asarray(p_gbm) + w.w_temporal * np.asarray(p_temporal) + w.w_seasonal * np.asarray(p_seasonal)
+    gbm = np.asarray(p_gbm, dtype=float)
+    tmp = np.asarray(p_temporal, dtype=float)
+    sea = np.asarray(p_seasonal, dtype=float)
+    # Устойчивость к NaN компонентов: 0 * NaN = NaN, поэтому веса
+    # перераспределяются на доступные компоненты (важно для полностью
+    # скрытых рядов, где seasonal не может построиться).
+    ws = np.array([w.w_gbm, w.w_temporal, w.w_seasonal], dtype=float)
+    stack = np.vstack([gbm, tmp, sea])
+    valid = np.isfinite(stack)
+    wsum = (valid * ws[:, None]).sum(axis=0)
+    out = (np.where(valid, stack, 0.0) * ws[:, None]).sum(axis=0)
+    out = np.divide(out, wsum, out=np.full_like(out, 0.5), where=wsum > 0)
     return np.clip(out, 0.0, 1.0)
 
 

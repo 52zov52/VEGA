@@ -15,9 +15,9 @@
 ## 2. Installation
 
 ```bash
-git clone <repo> && cd VEGA
+git clone https://github.com/52zov52/VEGA.git && cd VEGA
 cp .env.example .env
-py -m pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cd apps/web && npm install && cd ../..
 ```
 
@@ -48,7 +48,9 @@ cd apps/web && npm run dev
 ## 7. Run model
 
 ```bash
-py scripts/train.py --train data/train_dataset.csv --model-dir models --epochs 15
+py scripts/train.py --train data/train_dataset.csv --out models
+# без файла — обучение на demo-датасете; результат: models/*.joblib + meta.json
+# факт demo: RMSE 0.0142 (7d), GapScore 25.73; таблица: experiments/ensemble.csv
 ```
 
 ## 8. Generate submission
