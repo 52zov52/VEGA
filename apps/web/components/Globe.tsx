@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import * as THREE from "three";
 
 type Field = {
   id: string;
@@ -18,13 +19,6 @@ type Props = {
   onAnalyze: (id: string) => void;
   regionCenter?: [number, number];
   flyToTrigger?: number;
-};
-
-const LEVEL_COLOR: Record<string, string> = {
-  critical: "#f44336",
-  stress: "#ff9800",
-  watch: "#29b6f6",
-  normal: "#4caf50",
 };
 
 const CROP_RU: Record<string, string> = {
@@ -49,14 +43,56 @@ function getCropRu(crop: string): string {
 
 export { getCropRu };
 
-type PopupPos = { x: number; y: number; field: Field };
+// Создаёт 3D-пин (палочка + сфера) — рендерится в WebGL
+function createPinMesh(isSelected: boolean): THREE.Group {
+  const group = new THREE.Group();
+  const color = isSelected ? 0xffffff : 0x4caf50;
+  const emissive = isSelected ? 0x4caf50 : 0x2e7d32;
+
+  // Палочка (цилиндр)
+  const stickGeo = new THREE.CylinderGeometry(0.004, 0.004, 0.04, 8);
+  const stickMat = new THREE.MeshPhongMaterial({
+    color,
+    emissive,
+    emissiveIntensity: 0.3,
+    shininess: 80,
+  });
+  const stick = new THREE.Mesh(stickGeo, stickMat);
+  stick.rotation.x = Math.PI / 2;
+  stick.position.z = 0.02;
+  group.add(stick);
+
+  // Сфера (шарик сверху)
+  const headGeo = new THREE.SphereGeometry(0.012, 16, 16);
+  const headMat = new THREE.MeshPhongMaterial({
+    color,
+    emissive,
+    emissiveIntensity: 0.6,
+    shininess: 100,
+  });
+  const head = new THREE.Mesh(headGeo, headMat);
+  head.position.z = 0.042;
+  group.add(head);
+
+  // Точка на поверхности (подсветка)
+  const dotGeo = new THREE.SphereGeometry(0.006, 8, 8);
+  const dotMat = new THREE.MeshBasicMaterial({
+    color: isSelected ? 0xffffff : 0x4caf50,
+    transparent: true,
+    opacity: 0.8,
+  });
+  const dot = new THREE.Mesh(dotGeo, dotMat);
+  dot.position.z = 0.001;
+  group.add(dot);
+
+  return group;
+}
 
 export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger }: Props) {
   const globeRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
-  const [popup, setPopup] = useState<PopupPos | null>(null);
+  const [popup, setPopup] = useState<{ field: Field; x: number; y: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,88 +118,41 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     }));
 
   const polyCapColor = useCallback((d: any) => {
-    const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}22`;
+    const colors: Record<string, string> = { critical: "#f44336", stress: "#ff9800", watch: "#29b6f6" };
+    return `${colors[d.level] || "#4caf50"}22`;
   }, []);
 
   const polySideColor = useCallback((d: any) => {
-    const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}44`;
+    const colors: Record<string, string> = { critical: "#f44336", stress: "#ff9800", watch: "#29b6f6" };
+    return `${colors[d.level] || "#4caf50"}44`;
   }, []);
 
-  // WebGL-точки (идеальная синхронизация)
-  const pointData = fields
-    .filter((f) => f.center)
-    .map((f) => ({
+  // 3D-пины через customLayerData
+  const pinData = useMemo(() =>
+    fields.filter((f) => f.center).map((f) => ({
       id: f.id,
       lat: f.center[0],
       lng: f.center[1],
       crop: f.crop,
       area_ha: f.area_ha,
       isSelected: f.id === selectedId,
-    }));
-
-  // Клик по WebGL-точке → показать HTML-попап
-  function handlePointClick(d: any) {
-    onSelect(d.id);
-    // Получаем экранные координаты
-    if (globeRef.current) {
-      const coords = globeRef.current.getScreenCoords(d.lat, d.lng);
-      if (coords) {
-        const field = fields.find((f) => f.id === d.id);
-        if (field) {
-          setPopup({ x: coords.x, y: coords.y, field });
-        }
-      }
-    }
-  }
-
-  // Закрыть попап при клике на пустое место
-  useEffect(() => {
-    function closePopup() { setPopup(null); }
-    const container = containerRef.current;
-    if (!container) return;
-    container.addEventListener("click", closePopup);
-    return () => container.removeEventListener("click", closePopup);
-  }, []);
+    })),
+  [fields, selectedId]);
 
   // Летим к полю
   useEffect(() => {
     if (!globeRef.current || !selectedId) return;
     const field = fields.find((f) => f.id === selectedId);
     if (!field) return;
-    const [lat, lng] = field.center;
-    globeRef.current.pointOfView({ lat, lng, altitude: 0.04 }, 1600);
+    globeRef.current.pointOfView({ lat: field.center[0], lng: field.center[1], altitude: 0.04 }, 1600);
   }, [selectedId, flyToTrigger, fields]);
 
   // Летим к региону
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;
     if (selectedId) return;
-    const [lat, lng] = regionCenter;
-    globeRef.current.pointOfView({ lat, lng, altitude: 0.9 }, 1000);
+    globeRef.current.pointOfView({ lat: regionCenter[0], lng: regionCenter[1], altitude: 0.9 }, 1000);
   }, [regionCenter]);
-
-  // Обновлять позицию попапа при вращении
-  useEffect(() => {
-    if (!popup || !globeRef.current) return;
-    function updatePos() {
-      if (!popup || !globeRef.current || !globeRef.current.getScreenCoords) return;
-      const coords = globeRef.current.getScreenCoords(popup.field.center[0], popup.field.center[1]);
-      if (coords) {
-        setPopup((prev) => prev ? { ...prev, x: coords.x, y: coords.y } : null);
-      }
-    }
-    const globe = globeRef.current;
-    globe?.addEventListener?.("globe-rotate", updatePos);
-    // Also poll during animation
-    const iv = setInterval(updatePos, 50);
-    setTimeout(() => clearInterval(iv), 2000);
-    return () => {
-      globe?.removeEventListener?.("globe-rotate", updatePos);
-      clearInterval(iv);
-    };
-  }, [popup?.field?.id]);
 
   if (!ready || !GlobeComp) {
     return (
@@ -175,7 +164,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   }
 
   return (
-    <div className="globe-container" ref={containerRef}>
+    <div className="globe-container">
       <GlobeComp
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
@@ -195,14 +184,27 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
-        // WebGL-точки
-        pointsData={pointData}
-        pointLat="lat"
-        pointLng="lng"
-        pointColor={(d: any) => d.isSelected ? "#ffffff" : "#4caf50"}
-        pointAltitude={0.001}
-        pointRadius={(d: any) => d.isSelected ? 0.15 : 0.08}
-        onPointClick={(d: any) => handlePointClick(d)}
+        // 3D-пины (Three.js объекты в WebGL)
+        customLayerData={pinData}
+        customThreeObject={(d: any) => {
+          const mesh = createPinMesh(d.isSelected);
+          mesh.userData = { fieldData: d };
+          return mesh;
+        }}
+        onCustomLayerClick={(obj: any) => {
+          const d = obj.userData?.fieldData;
+          if (!d) return;
+          onSelect(d.id);
+          // Показать HTML-попап
+          if (globeRef.current?.getScreenCoords) {
+            const coords = globeRef.current.getScreenCoords(d.lat, d.lng);
+            if (coords) {
+              const field = fields.find((f) => f.id === d.id);
+              if (field) setPopup({ field, x: coords.x, y: coords.y });
+            }
+          }
+        }}
+        onCustomLayerHover={() => {}}
         // Контролы
         controlGlobe={false}
         animateIn={true}
@@ -211,7 +213,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         style={{ width: "100%", height: "100%" }}
       />
 
-      {/* HTML-попап поверх глобуса */}
+      {/* HTML-попап */}
       {popup && (
         <div
           className="globe-popup-overlay"
