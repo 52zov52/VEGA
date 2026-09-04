@@ -117,20 +117,28 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     })),
   [fields, selectedId]);
 
-  // rAF-цикл: читаем altitude из pointOfView(), скейлим все пины
+  // rAF-цикл: читаем позицию камеры напрямую из Three.js, скейлим все пины
   useEffect(() => {
     const globe = globeRef.current;
     if (!globe) return;
 
+    let lastScale = 0;
+
     const animate = () => {
       try {
-        const pov = globe.pointOfView();
-        if (pov && typeof pov.altitude === "number") {
-          const t = Math.min(pov.altitude / 1.5, 1);
+        const camera = globe.camera();
+        if (camera) {
+          const dist = camera.position.length();
+          const globeRadius = globe.getGlobeRadius?.() || 100;
+          const alt = Math.max(0, (dist - globeRadius) / globeRadius);
+          const t = Math.min(alt / 1.5, 1);
           const scale = MIN_SCALE + t * (MAX_SCALE - MIN_SCALE);
-          meshRefs.current.forEach((mesh) => {
-            mesh.scale.set(scale, scale, scale);
-          });
+          if (Math.abs(scale - lastScale) > 0.00001) {
+            lastScale = scale;
+            meshRefs.current.forEach((mesh) => {
+              mesh.scale.set(scale, scale, scale);
+            });
+          }
         }
       } catch {}
       rafId.current = requestAnimationFrame(animate);
