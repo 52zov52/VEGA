@@ -15,7 +15,6 @@ type Props = {
   fields: Field[];
   selectedId: string;
   onSelect: (id: string) => void;
-  onFieldHover?: (id: string | null) => void;
   regionCenter?: [number, number];
   flyToTrigger?: number;
 };
@@ -27,11 +26,34 @@ const LEVEL_COLOR: Record<string, string> = {
   normal: "#7cc46a",
 };
 
-export default function Globe({ fields, selectedId, onSelect, onFieldHover, regionCenter, flyToTrigger }: Props) {
+// Русские названия культур
+const CROP_RU: Record<string, string> = {
+  "winter wheat": "озимая пшеница",
+  "пшеница": "озимая пшеница",
+  "sunflower": "подсолнечник",
+  "подсолнечник": "подсолнечник",
+  "grain": "зерновые",
+  "зерновые": "зерновые",
+  "pasture": "пастбища",
+  "пастбища": "пастбища",
+  "corn": "кукуруза",
+  "кукуруза": "кукуруза",
+  "soybean": "соя",
+  "соя": "соя",
+};
+
+function getCropRu(crop: string): string {
+  if (!crop) return "—";
+  const lower = crop.toLowerCase();
+  return CROP_RU[lower] || crop;
+}
+
+export { getCropRu };
+
+export default function Globe({ fields, selectedId, onSelect, regionCenter, flyToTrigger }: Props) {
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
-  const prevSelected = useRef<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -44,7 +66,7 @@ export default function Globe({ fields, selectedId, onSelect, onFieldHover, regi
     return () => { cancelled = true; };
   }, []);
 
-  // Полигоны полей
+  // Полигоны
   const polygonData = fields
     .filter((f) => f.geometry?.coordinates)
     .map((f) => ({
@@ -58,101 +80,87 @@ export default function Globe({ fields, selectedId, onSelect, onFieldHover, regi
 
   const polyCapColor = useCallback((d: any) => {
     const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}44`;
+    return `${c}33`;
   }, []);
 
   const polySideColor = useCallback((d: any) => {
     const c = LEVEL_COLOR[d.level] || LEVEL_COLOR.normal;
-    return `${c}77`;
+    return `${c}55`;
   }, []);
 
-  // Точки (маркеры) — одно выбранное поле
+  // Точки — маленькие, точные
   const pointData = fields
-    .filter((f) => f.id === selectedId && f.center)
+    .filter((f) => f.center)
     .map((f) => ({
       id: f.id,
       lat: f.center[0],
       lng: f.center[1],
-      size: 0.6,
-      color: "#7cc46a",
-      label: f.id,
+      isSelected: f.id === selectedId,
     }));
 
-  // Летим к полю при выборе
+  // Летим к полю
   useEffect(() => {
     if (!globeRef.current || !selectedId) return;
     const field = fields.find((f) => f.id === selectedId);
     if (!field) return;
     const [lat, lng] = field.center;
-    globeRef.current.pointOfView({ lat, lng, altitude: 0.5 }, 1200);
+    globeRef.current.pointOfView({ lat, lng, altitude: 0.45 }, 1400);
   }, [selectedId, flyToTrigger, fields]);
 
   // Летим к региону
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;
-    if (selectedId) return; // если поле выбрано — летим к полю
+    if (selectedId) return;
     const [lat, lng] = regionCenter;
-    globeRef.current.pointOfView({ lat, lng, altitude: 0.8 }, 1000);
+    globeRef.current.pointOfView({ lat, lng, altitude: 0.9 }, 1000);
   }, [regionCenter]);
 
   if (!ready || !GlobeComp) {
     return (
-      <div style={{
-        width: "100%", height: "100%", display: "flex",
-        alignItems: "center", justifyContent: "center",
-        background: "#0a0e09", color: "var(--text-muted)",
-        fontSize: 13,
-      }}>
-        Загрузка глобуса…
+      <div className="globe-loading">
+        <div className="globe-loading-spinner" />
+        <span>Загрузка глобуса…</span>
       </div>
     );
   }
 
   return (
-    <GlobeComp
-      ref={globeRef}
-      globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-      backgroundImageUrl=""
-      backgroundColor="#0a0e09"
-      atmosphereColor="#7cc46a"
-      atmosphereAltitude={0.15}
-      globeTileEngineUrl={(x: number, y: number, l: number) =>
-        `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${l}/${y}/${x}`
-      }
-      // Полигоны
-      polygonsData={polygonData}
-      polygonGeoJsonGeometry="geoJsonGeometry"
-      polygonCapColor={polyCapColor}
-      polygonSideColor={polySideColor}
-      polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffcc" : "transparent"}
-      polygonAltitude={(d: any) => d.id === selectedId ? 0.006 : 0.002}
-      onPolygonClick={(d: any) => onSelect(d.id)}
-      polygonStrokeWidth={(d: any) => d.id === selectedId ? 2 : 0}
-      // Точки (маркеры)
-      pointsData={pointData}
-      pointLat="lat"
-      pointLng="lng"
-      pointColor="color"
-      pointAltitude={0.01}
-      pointRadius={0.35}
-      pointsMerge={false}
-      onPointClick={(d: any) => onSelect(d.id)}
-      // Labels
-      labelsData={pointData}
-      labelLat="lat"
-      labelLng="lng"
-      labelText="label"
-      labelSize={0.8}
-      labelDotRadius={0.3}
-      labelColor={() => "#7cc46a"}
-      labelResolution={2}
-      labelAltitude={0.012}
-      // Controls
-      controlGlobe={false}
-      animateIn={true}
-      width={undefined}
-      height={undefined}
-      style={{ width: "100%", height: "100%" }}
-    />
+    <div className="globe-container">
+      <GlobeComp
+        ref={globeRef}
+        globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+        backgroundImageUrl=""
+        backgroundColor="rgba(0,0,0,0)"
+        atmosphereColor="#4fc3f7"
+        atmosphereAltitude={0.25}
+        globeTileEngineUrl={(x: number, y: number, l: number) =>
+          `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${l}/${y}/${x}`
+        }
+        // Полигоны
+        polygonsData={polygonData}
+        polygonGeoJsonGeometry="geoJsonGeometry"
+        polygonCapColor={polyCapColor}
+        polygonSideColor={polySideColor}
+        polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffaa" : "transparent"}
+        polygonAltitude={(d: any) => d.id === selectedId ? 0.005 : 0.001}
+        polygonStrokeWidth={(d: any) => d.id === selectedId ? 1.5 : 0}
+        onPolygonClick={(d: any) => onSelect(d.id)}
+        // Маленькие точки
+        pointsData={pointData}
+        pointLat="lat"
+        pointLng="lng"
+        pointColor={(d: any) => d.isSelected ? "#ffffff" : "#7cc46a"}
+        pointAltitude={(d: any) => d.isSelected ? 0.012 : 0.005}
+        pointRadius={(d: any) => d.isSelected ? 0.18 : 0.1}
+        pointsMerge={false}
+        onPointClick={(d: any) => onSelect(d.id)}
+        // Контролы
+        controlGlobe={false}
+        animateIn={true}
+        width={undefined}
+        height={undefined}
+        style={{ width: "100%", height: "100%" }}
+      />
+    </div>
   );
 }

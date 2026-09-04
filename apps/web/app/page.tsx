@@ -2,12 +2,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as echarts from "echarts";
 import dynamic from "next/dynamic";
+import { MapPin, Layers, Pencil, Trash2, BarChart3, Play } from "lucide-react";
 import Modal from "../components/Modal";
 import KPI from "../components/KPI";
 import AnomalyCard from "../components/AnomalyCard";
 import { LoadingSkeleton, EmptyState, ErrorState, PipelineState } from "../components/UIStates";
 
 const Globe = dynamic(() => import("../components/Globe"), { ssr: false });
+import { getCropRu } from "../components/Globe";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -302,7 +304,7 @@ export default function Page() {
                 >
                   <div className="field-card-header">
                     <span className="field-card-id">{f.id}</span>
-                    <span className="badge normal">{f.crop}</span>
+                    <span className="badge normal">{getCropRu(f.crop)}</span>
                   </div>
                   <span className="field-card-area">{f.area_ha} га</span>
                   <label className="field-compare" onClick={(e) => e.stopPropagation()}>
@@ -382,7 +384,7 @@ export default function Page() {
           {selectedField && !modalOpen && (
             <div className="selected-bar" onClick={() => setModalOpen(true)}>
               <span className="selected-bar-id">{selectedField.id}</span>
-              <span className="selected-bar-crop">{selectedField.crop}</span>
+              <span className="selected-bar-crop">{getCropRu(selectedField.crop)}</span>
               <span className="selected-bar-area">{selectedField.area_ha} га</span>
               <span className="selected-bar-hint">Нажмите для анализа →</span>
             </div>
@@ -391,7 +393,7 @@ export default function Page() {
       </div>
 
       {/* Модальное окно анализа */}
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={selectedField ? `Поле ${selectedField.id}` : "Анализ"}>
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={selectedField ? `${selectedField.id} · ${getCropRu(selectedField.crop)}` : "Анализ"}>
         {loading && <PipelineState />}
         {error && <ErrorState text={error} />}
         {!loading && !kpi.current_ndvi && (
@@ -407,7 +409,7 @@ export default function Page() {
               <div key={i} className="anomaly-mini">
                 <span className={`badge ${a.level}`}>{a.level}</span>
                 <span className="anomaly-mini-period">{a.start_date} — {a.end_date}</span>
-                <span className="anomaly-mini-score">score {a.anomaly_score}</span>
+                <span className="anomaly-mini-score">оценка {a.anomaly_score}</span>
               </div>
             ))}
             {!analysis?.anomalies?.length && (

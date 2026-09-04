@@ -9,10 +9,10 @@ type KPIData = {
 };
 
 const LEVEL_META: Record<string, { label: string; color: string; icon: string }> = {
-  normal: { label: "Normal", color: "var(--accent-vegetation)", icon: "●" },
-  watch: { label: "Watch", color: "var(--accent-info)", icon: "◐" },
-  stress: { label: "Stress", color: "var(--accent-warning)", icon: "◑" },
-  critical: { label: "Critical", color: "var(--accent-critical)", icon: "◉" },
+  normal: { label: "Норма", color: "var(--accent-vegetation)", icon: "●" },
+  watch: { label: "Наблюдение", color: "var(--accent-info)", icon: "◐" },
+  stress: { label: "Стресс", color: "var(--accent-warning)", icon: "◑" },
+  critical: { label: "Критично", color: "var(--accent-critical)", icon: "◉" },
 };
 
 export default function KPI({ data }: { data: KPIData }) {
@@ -22,11 +22,11 @@ export default function KPI({ data }: { data: KPIData }) {
   return (
     <div className="kpi-grid">
       <div className="kpi-card">
-        <span className="kpi-label">Current NDVI</span>
+        <span className="kpi-label">Текущий NDVI</span>
         <span className="kpi-value">{data.current_ndvi}</span>
       </div>
       <div className="kpi-card">
-        <span className="kpi-label">Season deviation</span>
+        <span className="kpi-label">Отклонение</span>
         <span className="kpi-value" style={{
           color: (data.season_deviation_pct || 0) < -10
             ? "var(--accent-critical)" : (data.season_deviation_pct || 0) < -5
@@ -36,13 +36,13 @@ export default function KPI({ data }: { data: KPIData }) {
         </span>
       </div>
       <div className="kpi-card">
-        <span className="kpi-label">Risk level</span>
+        <span className="kpi-label">Риск</span>
         <span className="kpi-value" style={{ color: meta.color }}>
           {meta.icon} {meta.label}
         </span>
       </div>
       <div className="kpi-card">
-        <span className="kpi-label">Data quality</span>
+        <span className="kpi-label">Качество</span>
         <span className="kpi-value">{data.data_quality ?? "—"}%</span>
       </div>
     </div>
