@@ -1,21 +1,25 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import * as echarts from "echarts";
+import dynamic from "next/dynamic";
+import KPI from "../components/KPI";
+import AnomalyCard from "../components/AnomalyCard";
+import { LoadingSkeleton, EmptyState, ErrorState, PipelineState } from "../components/UIStates";
+
+const Globe = dynamic(() => import("../components/Globe"), { ssr: false });
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-type Field = { id: string; region_id: string; crop: string; area_ha: number; center: [number, number] };
+type Field = { id: string; region_id: string; crop: string; area_ha: number; center: [number, number]; geometry?: any };
 type SavedPoly = { id: string; name: string; geometry: any };
 
-const LEVEL_COLOR: Record<string, string> = {
-  critical: "#e05c5c",
-  stress: "#e0a83c",
-  watch: "#6aa9c4",
-  normal: "#7cc46a",
+const REGION_COORDS: Record<string, [number, number]> = {
+  rostov: [47.2, 39.7],
+  krasnodar: [45.0, 38.9],
+  voronezh: [51.6, 39.2],
 };
 
 export default function Page() {
-  const mapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const compareRef = useRef<HTMLDivElement>(null);
   const [regions, setRegions] = useState<any[]>([]);
@@ -29,14 +33,13 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [layers, setLayers] = useState({ agriculture: true, ndvi: true, anomaly: true });
-  // Рисование полигона (§4): режим + вершины + сохранённые
   const [drawMode, setDrawMode] = useState(false);
   const [vertices, setVertices] = useState<[number, number][]>([]);
   const [saved, setSaved] = useState<SavedPoly[]>([]);
-  // Сравнение полей (§23)
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareData, setCompareData] = useState<any[]>([]);
   const [comparing, setComparing] = useState(false);
+  const [globeFlyTo, setGlobeFlyTo] = useState(0);
 
   async function loadRegions(q = "") {
     try {
@@ -51,7 +54,7 @@ export default function Page() {
     try {
       const r = await fetch(`${API}/api/polygons`).then((x) => x.json());
       setSaved(r.polygons || []);
-    } catch { /* backend недоступен — покажем пустой список, а не 500 */ }
+    } catch { /* backend недоступен */ }
   }
 
   useEffect(() => { loadRegions(""); loadSaved(); }, []);
@@ -66,30 +69,11 @@ export default function Page() {
         if (list.length && !fieldId) setFieldId(list[0].id);
       })
       .catch(() => setFieldsState("error"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regionId]);
 
-  // Карта: главный элемент интерфейса (§4). MapLibre + подсветка аномальных участков.
-  useEffect(() => {
-    let map: any;
-    let cancelled = false;
-    (async () => {
-      const maplibre = await import("maplibre-gl");
-      await import("maplibre-gl/dist/maplibre-gl.css");
-      if (!mapRef.current || (mapRef.current as any)._vega || cancelled) return;
-      (mapRef.current as any)._vega = true;
-      map = new maplibre.Map({
-        container: mapRef.current!, style: "https://demotiles.maplibre.org/style.json",
-        center: [39.7, 47.2], zoom: 7,
-      });
-      (window as any).__vegaMap = map;
-      map.on("click", (e: any) => {
-        // В режиме рисования клики ставят вершины вместо выбора поля.
-        const ev = new CustomEvent("vega-map-click", { detail: [e.lngLat.lng, e.lngLat.lat] });
-        window.dispatchEvent(ev);
-      });
-    })();
-    return () => { cancelled = true; };
+  const handleFieldSelect = useCallback((id: string) => {
+    setFieldId(id);
+    setGlobeFlyTo((n) => n + 1);
   }, []);
 
   // Клики карты -> вершины рисуемого полигона
@@ -103,52 +87,6 @@ export default function Page() {
     return () => window.removeEventListener("vega-map-click", onClick);
   }, [drawMode]);
 
-  // Маркеры полей + heatmap-подсветка по уровню риска
-  useEffect(() => {
-    const map = (window as any).__vegaMap;
-    if (!map || !fields.length) return;
-    const markers: any[] = [];
-    let cancelled = false;
-    (async () => {
-      const maplibre = await import("maplibre-gl");
-      if (cancelled) return;
-      if (!layers.agriculture) return;
-      fields.slice(0, 60).forEach((f) => {
-        const el = document.createElement("button");
-        el.textContent = "▣";
-        el.title = `${f.id} · ${f.crop}`;
-        const isSel = f.id === fieldId;
-        el.style.cssText = `background:none;border:0;font-size:${isSel ? 24 : 18}px;cursor:pointer;color:${isSel ? "#ffffff" : "#7cc46a"};${isSel ? "text-shadow:0 0 8px #7cc46a;" : ""}`;
-        el.setAttribute("aria-label", `Выбрать поле ${f.id}`);
-        el.onclick = () => setFieldId(f.id);
-        markers.push(new maplibre.Marker({ element: el }).setLngLat([f.center[1], f.center[0]]).addTo(map));
-      });
-      map.flyTo({ center: [fields[0].center[1], fields[0].center[0]], zoom: 9 });
-    })();
-    return () => { cancelled = true; markers.forEach((m) => m.remove()); };
-  }, [fields, fieldId, layers.agriculture]);
-
-  // Слой рисуемого полигона
-  useEffect(() => {
-    const map = (window as any).__vegaMap;
-    if (!map || vertices.length < 2) return;
-    const coords = [...vertices, vertices[0]];
-    const id = "vega-draw";
-    const geo = { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [coords] } };
-    if (map.getSource(id)) (map.getSource(id) as any).setData(geo);
-    else {
-      map.addSource(id, { type: "geojson", data: geo });
-      map.addLayer({ id, type: "fill", source: id, paint: { "fill-color": "#7cc46a", "fill-opacity": 0.3 } });
-    }
-    return () => { /* слой живёт до завершения рисования */ };
-  }, [vertices]);
-
-  function clearDrawLayer() {
-    const map = (window as any).__vegaMap;
-    try { if (map?.getLayer("vega-draw")) map.removeLayer("vega-draw"); } catch {}
-    try { if (map?.getSource("vega-draw")) map.removeSource("vega-draw"); } catch {}
-  }
-
   async function finishDrawing() {
     if (vertices.length < 3) { setError("Нужно минимум 3 точки: кликайте по карте."); return; }
     const geometry = { type: "Polygon", coordinates: [[...vertices, vertices[0]]] };
@@ -160,7 +98,7 @@ export default function Page() {
       const poly = await r.json();
       setSaved((s) => [...s, poly]);
       setFieldId(poly.id);
-      setVertices([]); setDrawMode(false); clearDrawLayer();
+      setVertices([]); setDrawMode(false);
     } catch { setError("Не удалось сохранить полигон: backend недоступен."); }
   }
 
@@ -171,24 +109,71 @@ export default function Page() {
     } catch { setError("Не удалось удалить полигон."); }
   }
 
-  // График: observed + climatology + anomaly zones + precipitation (§21)
+  // График: observed + climatology + anomaly zones + precipitation
   useEffect(() => {
     if (!chartRef.current || !ts.length) return;
     const chart = echarts.init(chartRef.current);
     chart.setOption({
       backgroundColor: "transparent",
-      tooltip: { trigger: "axis" },
-      legend: { textStyle: { color: "#a8b09f" } },
-      xAxis: { type: "category", data: ts.map((p) => p.date) },
-      yAxis: [{ type: "value", name: "NDVI" }, { type: "value", name: "мм" }],
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: "#181d17ee",
+        borderColor: "#2a3029",
+        textStyle: { color: "#f2f4ec", fontSize: 12 },
+      },
+      legend: {
+        textStyle: { color: "#a8b09f", fontSize: 11 },
+        top: 0,
+        itemGap: 16,
+      },
+      grid: { left: 50, right: 50, bottom: 30, top: 40 },
+      xAxis: {
+        type: "category", data: ts.map((p) => p.date),
+        axisLine: { lineStyle: { color: "#2a3029" } },
+        axisLabel: { color: "#a8b09f", fontSize: 10 },
+      },
+      yAxis: [
+        {
+          type: "value", name: "NDVI",
+          nameTextStyle: { color: "#a8b09f", fontSize: 10 },
+          axisLine: { lineStyle: { color: "#2a3029" } },
+          axisLabel: { color: "#a8b09f", fontSize: 10 },
+          splitLine: { lineStyle: { color: "#1e241c" } },
+        },
+        {
+          type: "value", name: "мм",
+          nameTextStyle: { color: "#a8b09f", fontSize: 10 },
+          axisLine: { lineStyle: { color: "#2a3029" } },
+          axisLabel: { color: "#a8b09f", fontSize: 10 },
+          splitLine: { show: false },
+        },
+      ],
       series: [
-        ...(layers.ndvi ? [{ name: "NDVI", type: "line", data: ts.map((p) => p.ndvi_observed), smooth: true, lineStyle: { width: 2, color: "#7cc46a" } }] : []),
-        { name: "Норма", type: "line", data: ts.map((p) => p.ndvi_climatology), lineStyle: { type: "dashed", color: "#a8b09f" } },
-        { name: "Осадки", type: "bar", yAxisIndex: 1, data: ts.map((p) => p.precipitation), opacity: 0.4 },
+        ...(layers.ndvi ? [{
+          name: "NDVI", type: "line", data: ts.map((p) => p.ndvi_observed),
+          smooth: true, symbol: "none",
+          lineStyle: { width: 2.5, color: "#7cc46a" },
+          areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: "#7cc46a33" },
+            { offset: 1, color: "#7cc46a05" },
+          ]) },
+        }] : []),
+        {
+          name: "Норма", type: "line", data: ts.map((p) => p.ndvi_climatology),
+          lineStyle: { type: "dashed", color: "#a8b09f", width: 1.5 },
+          symbol: "none",
+        },
+        {
+          name: "Осадки", type: "bar", yAxisIndex: 1,
+          data: ts.map((p) => p.precipitation),
+          itemStyle: { color: "#6aa9c444" },
+          barWidth: "40%",
+        },
         ...(layers.anomaly ? [{
           name: "Аномалия", type: "scatter",
           data: ts.filter((p) => p.anomaly).map((p) => [p.date, p.ndvi_observed]),
-          symbolSize: 10, itemStyle: { color: "#e05c5c" },
+          symbolSize: 10,
+          itemStyle: { color: "#e05c5c", borderColor: "#e05c5c88", borderWidth: 2 },
         }] : []),
       ],
     });
@@ -197,19 +182,19 @@ export default function Page() {
     return () => { window.removeEventListener("resize", onResize); chart.dispose(); };
   }, [ts, layers.ndvi, layers.anomaly]);
 
-  // Сравнительный график 2–5 полей (§23)
+  // Сравнительный график
   useEffect(() => {
     if (!compareRef.current || !compareData.length) return;
     const chart = echarts.init(compareRef.current);
     const dates = compareData[0]?.ts.map((p: any) => p.date) || [];
     chart.setOption({
       backgroundColor: "transparent",
-      tooltip: { trigger: "axis" },
+      tooltip: { trigger: "axis", backgroundColor: "#181d17ee", borderColor: "#2a3029", textStyle: { color: "#f2f4ec" } },
       legend: { textStyle: { color: "#a8b09f" } },
-      xAxis: { type: "category", data: dates },
-      yAxis: { type: "value", name: "NDVI" },
+      xAxis: { type: "category", data: dates, axisLine: { lineStyle: { color: "#2a3029" } }, axisLabel: { color: "#a8b09f" } },
+      yAxis: { type: "value", name: "NDVI", axisLine: { lineStyle: { color: "#2a3029" } }, axisLabel: { color: "#a8b09f" }, splitLine: { lineStyle: { color: "#1e241c" } } },
       series: compareData.map((c: any, i: number) => ({
-        name: c.id, type: "line", smooth: true,
+        name: c.id, type: "line", smooth: true, symbol: "none",
         data: c.ts.map((p: any) => p.ndvi_observed),
         lineStyle: { color: ["#7cc46a", "#6aa9c4", "#e0a83c", "#e05c5c", "#b48ce0"][i % 5], width: 2 },
       })),
@@ -240,14 +225,14 @@ export default function Page() {
       setAnalysis(full);
       setTs(full.ts);
     } catch (err: any) {
-      setError(`Анализ недоступен: ${err.message}. Проверьте, что backend запущен (uvicorn apps.api.main:app --port 8000).`);
+      setError(`Анализ недоступен: ${err.message}.`);
     } finally {
       setLoading(false);
     }
   }
 
   async function runCompare() {
-    if (compareIds.length < 2) { setError("Для сравнения выберите 2–5 полей галочками."); return; }
+    if (compareIds.length < 2) { setError("Для сравнения выберите 2–5 полей."); return; }
     setComparing(true); setError(null);
     try {
       const rows = [];
@@ -268,128 +253,193 @@ export default function Page() {
   const expl = analysis?.explanations?.[0];
 
   return (
-    <div>
-      <header style={{ display: "flex", gap: 12, alignItems: "center", padding: "10px 16px" }}>
-        <b>VEGA</b><span style={{ color: "var(--text-muted)" }}>Vegetation Intelligence</span>
-        <span style={{ flex: 1 }} />
-        <button className="secondary" onClick={() => runAnalyze(true)} disabled={loading}>Demo mode</button>
-        <button onClick={() => runAnalyze(false)} disabled={loading || !fieldId}>{loading ? "Анализ…" : "Run live analysis"}</button>
-      </header>
-      <div className="layout">
-        <aside className="sidebar" aria-label="Регионы и поля">
-          <label htmlFor="region-search">Поиск региона</label>
-          <input id="region-search" placeholder="rostov…" value={regionQuery}
-            onChange={(e) => { setRegionQuery(e.target.value); loadRegions(e.target.value); }} />
-          <label htmlFor="region-select" style={{ marginTop: 8 }}>Регион</label>
-          <select id="region-select" value={regionId} onChange={(e) => setRegionId(e.target.value)}>
-            {(regions.length ? regions : [{ id: "rostov", name: "Rostov region" }, { id: "krasnodar", name: "Krasnodar region" }, { id: "voronezh", name: "Voronezh region" }]).map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
-          <h4>Поля ({fields.length})</h4>
-          {fieldsState === "loading" && <div className="skeleton" aria-label="Загрузка полей">Загрузка контуров…</div>}
-          {fieldsState === "empty" && <p style={{ color: "var(--text-muted)" }}>Контуры не найдены. Нарисуйте свой полигон.</p>}
-          {fieldsState === "error" && (
-            <div className="card" role="alert">⚠ Не удалось загрузить поля.
-              <button className="secondary" onClick={() => setRegionId((r) => r)}>Повторить</button>
-            </div>
-          )}
-          {fields.slice(0, 12).map((f) => (
-            <div key={f.id} className="card" style={{ border: f.id === fieldId ? "1px solid var(--accent-vegetation)" : "none" }}>
-              <b>{f.id}</b> <span className="badge normal">{f.crop}</span>
-              <div style={{ color: "var(--text-muted)" }}>{f.area_ha} га</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button className="secondary" onClick={() => setFieldId(f.id)} disabled={loading}>Выбрать</button>
-                <label style={{ fontSize: 12 }}><input type="checkbox" checked={compareIds.includes(f.id)} onChange={() => toggleCompare(f.id)} /> сравнить</label>
-              </div>
-            </div>
-          ))}
-          <button className="secondary" onClick={runCompare} disabled={comparing || compareIds.length < 2}>
-            {comparing ? "Сравнение…" : `Сравнить (${compareIds.length})`}
+    <div className="app">
+      {/* ─── Header ─── */}
+      <header className="header">
+        <div className="header-brand">
+          <span className="header-logo">◇</span>
+          <span className="header-title">VEGA</span>
+          <span className="header-sub">Vegetation Intelligence</span>
+        </div>
+        <div className="header-actions">
+          <button className="btn-secondary" onClick={() => runAnalyze(true)} disabled={loading}>
+            Demo mode
           </button>
-          <h4>Свой полигон</h4>
-          {!drawMode
-            ? <button className="secondary" onClick={() => { setDrawMode(true); setVertices([]); }}>✏ Нарисовать полигон</button>
-            : (
-              <div className="card">
-                <p>Кликайте по карте: точек {vertices.length}. Двойной клик/кнопка — завершить.</p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={finishDrawing} disabled={vertices.length < 3}>Завершить</button>
-                  <button className="secondary" onClick={() => { setDrawMode(false); setVertices([]); clearDrawLayer(); }}>Отмена</button>
-                </div>
-              </div>
-            )}
-          <h4>Сохранённые ({saved.length})</h4>
-          {!saved.length && <p style={{ color: "var(--text-muted)", fontSize: 12 }}>Пока пусто.</p>}
-          {saved.map((p) => (
-            <div key={p.id} className="card">
-              <b>{p.id}</b>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button className="secondary" onClick={() => setFieldId(p.id)}>Выбрать</button>
-                <button className="secondary" onClick={() => deleteSaved(p.id)} aria-label={`Удалить ${p.id}`}>Удалить</button>
-              </div>
+          <button className="btn-primary" onClick={() => runAnalyze(false)} disabled={loading || !fieldId}>
+            {loading ? <PipelineState /> : "Run live analysis"}
+          </button>
+        </div>
+      </header>
+
+      {/* ─── Main layout ─── */}
+      <div className="layout">
+        {/* ─── Sidebar ─── */}
+        <aside className="sidebar">
+          <div className="sidebar-section">
+            <label className="label" htmlFor="region-search">Регион</label>
+            <input
+              id="region-search"
+              className="input"
+              placeholder="Поиск региона…"
+              value={regionQuery}
+              onChange={(e) => { setRegionQuery(e.target.value); loadRegions(e.target.value); }}
+            />
+            <select
+              className="input select"
+              value={regionId}
+              onChange={(e) => setRegionId(e.target.value)}
+            >
+              {(regions.length ? regions : [
+                { id: "rostov", name: "Rostov region" },
+                { id: "krasnodar", name: "Krasnodar region" },
+                { id: "voronezh", name: "Voronezh region" },
+              ]).map((r: any) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sidebar-section">
+            <div className="sidebar-section-header">
+              <span className="label">Поля</span>
+              <span className="badge-count">{fields.length}</span>
             </div>
-          ))}
-          <h4>Слои</h4>
-          {(Object.keys(layers) as (keyof typeof layers)[]).map((k) => (
-            <label key={k} style={{ display: "block" }}>
-              <input type="checkbox" checked={layers[k]} onChange={() => setLayers({ ...layers, [k]: !layers[k] })} /> {k}
-            </label>
-          ))}
-        </aside>
-        <main className="map-wrap" aria-label="Карта">
-          <div id="map" ref={mapRef} role="application" aria-label="Карта полей" />
-          {!fields.length && fieldsState !== "error" && <div className="skeleton">Загрузка карты…</div>}
-          {drawMode && <div className="card" style={{ position: "absolute", top: 8, left: 8, zIndex: 5 }}>✏ Режим рисования: кликните {Math.max(0, 3 - vertices.length)}+ точек</div>}
-        </main>
-        <aside className="panel" aria-label="Анализ поля">
-          {error && <div className="card" role="alert">⚠ {error}</div>}
-          <h3>Выбранное поле: {fieldId || "—"}</h3>
-          {loading && <div className="skeleton" aria-label="Анализ выполняется">Сбор данных → ряд → ML → аномалии…</div>}
-          {!!kpi.current_ndvi && (
-            <>
-              <div className="kpi">
-                <div>NDVI<b>{kpi.current_ndvi}</b></div>
-                <div>Отклонение<b>{kpi.season_deviation_pct}%</b></div>
-                <div>Риск<b style={{ color: LEVEL_COLOR[kpi.level] || undefined }}>{kpi.level}</b></div>
-                <div>Качество<b>{kpi.data_quality}</b></div>
-              </div>
-              <div ref={chartRef} style={{ height: 280 }} role="img" aria-label="Временной ряд NDVI" />
-              {analysis?.anomalies?.slice(0, 3).map((a: any, i: number) => (
-                <div key={i} className="card">
-                  <span className={`badge ${a.level}`}>{a.level}</span> {a.start_date} — {a.end_date}
-                  <div>score {a.anomaly_score} · z {a.zscore} · {a.deviation_pct}%</div>
+            {fieldsState === "loading" && <LoadingSkeleton text="Загрузка контуров…" />}
+            {fieldsState === "empty" && <EmptyState text="Контуры не найдены. Нарисуйте свой полигон." icon="◇" />}
+            {fieldsState === "error" && (
+              <ErrorState text="Не удалось загрузить поля." onRetry={() => setRegionId((r) => r)} />
+            )}
+            <div className="field-list">
+              {fields.slice(0, 15).map((f) => (
+                <div
+                  key={f.id}
+                  className={`field-card ${f.id === fieldId ? "selected" : ""}`}
+                  onClick={() => handleFieldSelect(f.id)}
+                >
+                  <div className="field-card-header">
+                    <span className="field-card-id">{f.id}</span>
+                    <span className="badge normal">{f.crop}</span>
+                  </div>
+                  <span className="field-card-area">{f.area_ha} га</span>
+                  <label className="field-compare" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={compareIds.includes(f.id)}
+                      onChange={() => toggleCompare(f.id)}
+                    />
+                    <span>сравнить</span>
+                  </label>
                 </div>
               ))}
-              {!analysis?.anomalies?.length && <p style={{ color: "var(--text-muted)" }}>Аномалий не выявлено — поле в норме.</p>}
-              {expl && (
-                <div className="card" aria-label="Почему аномалия">
-                  <h4>WHY IS THIS ANOMALY?</h4>
-                  <p>{expl.headline}</p>
-                  {expl.factors.map((f: any) => (
-                    <div key={f.signal}>{f.signal} {f.delta_pct > 0 ? "+" : ""}{f.delta_pct}% ({f.strength})
-                      <div className="bar"><i style={{ width: `${Math.min(100, Math.abs(f.delta_pct))}%` }} /></div>
-                    </div>
-                  ))}
-                  <p><b>Вывод:</b> {expl.likely_cause}</p>
-                  <p>Уверенность: {Math.round(expl.confidence * 100)}%</p>
-                  <p style={{ color: "var(--text-muted)" }}>{expl.narrative}</p>
+            </div>
+            {compareIds.length >= 2 && (
+              <button className="btn-secondary btn-full" onClick={runCompare} disabled={comparing}>
+                {comparing ? "Сравнение…" : `Сравнить (${compareIds.length})`}
+              </button>
+            )}
+          </div>
+
+          <div className="sidebar-section">
+            <span className="label">Свой полигон</span>
+            {!drawMode
+              ? <button className="btn-secondary btn-full" onClick={() => { setDrawMode(true); setVertices([]); }}>✏ Нарисовать</button>
+              : (
+                <div className="draw-info">
+                  <span>Точек: {vertices.length}. Нужно ≥ 3.</span>
+                  <div className="draw-actions">
+                    <button className="btn-primary btn-sm" onClick={finishDrawing} disabled={vertices.length < 3}>Готово</button>
+                    <button className="btn-secondary btn-sm" onClick={() => { setDrawMode(false); setVertices([]); }}>Отмена</button>
+                  </div>
                 </div>
               )}
-              {analysis?.warnings?.map((w: string, i: number) => (
-                <div key={i} style={{ color: "var(--text-muted)", fontSize: 12 }}>ℹ {w}</div>
-              ))}
-            </>
-          )}
-          {!kpi.current_ndvi && !loading && <p style={{ color: "var(--text-muted)" }}>Выберите поле и нажмите «Run live analysis». Данные соберутся автоматически.</p>}
-          {!!compareData.length && (
-            <div className="card">
-              <h4>Сравнение полей</h4>
-              <div ref={compareRef} style={{ height: 240 }} role="img" aria-label="Сравнение полей" />
-              {compareData.map((c: any) => (
-                <div key={c.id}><b>{c.id}</b> NDVI {c.kpi?.current_ndvi} · {c.kpi?.level} · {c.kpi?.season_deviation_pct}%</div>
+          </div>
+
+          {saved.length > 0 && (
+            <div className="sidebar-section">
+              <span className="label">Сохранённые ({saved.length})</span>
+              {saved.map((p) => (
+                <div key={p.id} className="field-card">
+                  <span className="field-card-id">{p.id}</span>
+                  <div className="draw-actions">
+                    <button className="btn-secondary btn-sm" onClick={() => handleFieldSelect(p.id)}>Выбрать</button>
+                    <button className="btn-ghost btn-sm" onClick={() => deleteSaved(p.id)}>Удалить</button>
+                  </div>
+                </div>
               ))}
             </div>
+          )}
+
+          <div className="sidebar-section">
+            <span className="label">Слои</span>
+            {(Object.keys(layers) as (keyof typeof layers)[]).map((k) => (
+              <label key={k} className="layer-toggle">
+                <input type="checkbox" checked={layers[k]} onChange={() => setLayers({ ...layers, [k]: !layers[k] })} />
+                <span>{k}</span>
+              </label>
+            ))}
+          </div>
+        </aside>
+
+        {/* ─── Globe / Map ─── */}
+        <main className="globe-wrap">
+          <Globe
+            fields={fields}
+            selectedId={fieldId}
+            onSelect={handleFieldSelect}
+            regionCenter={REGION_COORDS[regionId] || [47.2, 39.7]}
+            flyTo={globeFlyTo}
+          />
+          {drawMode && (
+            <div className="draw-overlay">
+              ✏ Режим рисования: кликните {Math.max(0, 3 - vertices.length)}+ точек
+            </div>
+          )}
+        </main>
+
+        {/* ─── Analysis panel ─── */}
+        <aside className="panel">
+          {error && <ErrorState text={error} />}
+
+          <div className="panel-header">
+            <span className="label">Поле</span>
+            <span className="panel-field-id">{fieldId || "—"}</span>
+          </div>
+
+          {loading && <PipelineState />}
+
+          {!loading && !kpi.current_ndvi && (
+            <EmptyState text="Выберите поле и нажмите «Run live analysis»." icon="◉" />
+          )}
+
+          {!!kpi.current_ndvi && (
+            <>
+              <KPI data={kpi} />
+
+              <div className="chart-container">
+                <div ref={chartRef} style={{ width: "100%", height: 260 }} />
+              </div>
+
+              {analysis?.anomalies?.slice(0, 3).map((a: any, i: number) => (
+                <div key={i} className="anomaly-mini">
+                  <span className={`badge ${a.level}`}>{a.level}</span>
+                  <span className="anomaly-mini-period">{a.start_date} — {a.end_date}</span>
+                  <span className="anomaly-mini-score">score {a.anomaly_score}</span>
+                </div>
+              ))}
+
+              {!analysis?.anomalies?.length && (
+                <div className="all-clear">
+                  <span className="all-clear-icon">●</span>
+                  Аномалий не выявлено — поле в норме.
+                </div>
+              )}
+
+              {expl && <AnomalyCard explanation={expl} />}
+
+              {analysis?.warnings?.map((w: string, i: number) => (
+                <div key={i} className="info-note">ℹ {w}</div>
+              ))}
+            </>
           )}
         </aside>
       </div>
