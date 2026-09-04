@@ -69,7 +69,6 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   const [ready, setReady] = useState(false);
   const [popup, setPopup] = useState<{ field: Field; x: number; y: number } | null>(null);
   const meshRefs = useRef<Map<string, THREE.Group>>(new Map());
-  const currentScale = useRef(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,38 +113,38 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     })),
   [fields, selectedId]);
 
-  // zoom: onZoom даёт event, берём расстояние из camera
-  const handleZoom = useCallback(() => {
-    const globe = globeRef.current;
-    if (!globe) return;
-    try {
-      const camera = globe.camera?.();
-      if (camera) {
-        const dist = camera.position.length();
-        const globeR = 100;
-        const alt = Math.max(0, (dist - globeR) / globeR);
-        const t = Math.min(Math.max(alt / 1.5, 0), 1);
-        const s = 0.5 + t * 4;
-        currentScale.current = s;
-        meshRefs.current.forEach((mesh) => {
-          mesh.scale.set(s, s, s);
-        });
-      }
-    } catch {}
+  // Вычислить scale из altitude
+  const scaleFromAlt = useCallback((alt: number) => {
+    // alt: 0 (surface) → 2+ (far)
+    // scale: 1 (close, default pin size) → 10 (far, big pins)
+    const t = Math.min(alt / 2, 1);
+    return 1 + t * 9;
   }, []);
 
+  // Обновить scale всех пинов
+  const updateScales = useCallback((alt: number) => {
+    const s = scaleFromAlt(alt);
+    meshRefs.current.forEach((mesh) => {
+      mesh.scale.set(s, s, s);
+    });
+  }, [scaleFromAlt]);
+
+  // Летим к полю
   useEffect(() => {
     if (!globeRef.current || !selectedId) return;
     const field = fields.find((f) => f.id === selectedId);
     if (!field) return;
     globeRef.current.pointOfView({ lat: field.center[0], lng: field.center[1], altitude: 0.04 }, 1600);
-  }, [selectedId, flyToTrigger, fields]);
+    updateScales(0.04);
+  }, [selectedId, flyToTrigger, fields, updateScales]);
 
+  // Летим к региону
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;
     if (selectedId) return;
     globeRef.current.pointOfView({ lat: regionCenter[0], lng: regionCenter[1], altitude: 0.9 }, 1000);
-  }, [regionCenter]);
+    updateScales(0.9);
+  }, [regionCenter, selectedId, updateScales]);
 
   if (!ready || !GlobeComp) {
     return (
@@ -176,14 +175,11 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
-        onZoom={handleZoom}
         customLayerData={pinData}
         customThreeObject={(d: any) => {
           const mesh = createPinMesh(d.isSelected);
           mesh.userData = { fieldData: d };
           meshRefs.current.set(d.id, mesh);
-          const s = currentScale.current;
-          mesh.scale.set(s, s, s);
           return mesh;
         }}
         customThreeObjectUpdate={(obj: any, d: any) => {
