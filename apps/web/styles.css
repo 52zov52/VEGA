@@ -653,6 +653,33 @@ button, .btn-primary, .btn-secondary, .btn-ghost {
   .sidebar { display: none; }
 }
 
+/* ─── Globe HTML markers (Google Maps pins) ─── */
+.globe-markers {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  overflow: hidden;
+}
+.globe-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  will-change: transform;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));
+  transition: opacity 0.15s;
+  line-height: 0;
+}
+.globe-marker:hover {
+  filter: drop-shadow(0 2px 8px rgba(0,0,0,0.8)) brightness(1.1);
+}
+.globe-marker.selected {
+  z-index: 2;
+  filter: drop-shadow(0 0 8px rgba(76,175,80,0.7));
+}
+
 /* ─── Globe Popup (HTML overlay, NOT inside WebGL) ─── */
 .globe-popup-anchor {
   position: absolute;

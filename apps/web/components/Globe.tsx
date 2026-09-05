@@ -1,6 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import * as THREE from "three";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 type Field = {
   id: string;
@@ -42,6 +41,91 @@ function getCropRu(crop: string): string {
 }
 
 export { getCropRu };
+
+// HTML-маркеры в стиле Google Maps: один rAF-цикл двигает все div'ы
+// через getScreenCoords каждый кадр — привязка жёсткая, отставания нет.
+// Клики — обычные DOM onClick. Маршрут на обратной стороне глобуса прячем.
+function MarkersOverlay({ globeRef, fields, selectedId, onSelect }: {
+  globeRef: React.RefObject<any>;
+  fields: Field[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  const elsRef = useRef(new Map<string, HTMLDivElement>());
+
+  const setEl = useCallback((id: string) => (el: HTMLDivElement | null) => {
+    if (el) elsRef.current.set(id, el);
+    else elsRef.current.delete(id);
+  }, []);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const g = globeRef.current;
+      if (g?.getScreenCoords) {
+        let cam: any = null;
+        let R = 100;
+        try {
+          const c = g.camera?.();
+          if (c?.position) { cam = c.position; R = g.getGlobeRadius?.() ?? 100; }
+        } catch { cam = null; }
+        const dist = cam ? Math.sqrt(cam.x * cam.x + cam.y * cam.y + cam.z * cam.z) : 0;
+        for (const f of fields) {
+          const el = elsRef.current.get(f.id);
+          if (!el || !f.center) continue;
+          try {
+            const p = g.getScreenCoords(f.center[0], f.center[1]);
+            let vis = !!p && typeof p.x === "number";
+            if (vis && cam && dist > 0) {
+              const m = g.getCoords(f.center[0], f.center[1], 0);
+              const cosAng = (m.x * cam.x + m.y * cam.y + m.z * cam.z) / (R * dist);
+              if (cosAng <= R / dist) vis = false; // обратная сторона
+            }
+            if (vis) {
+              el.style.transform = `translate(-50%, -100%) translate(${p.x}px, ${p.y}px)`;
+              el.style.opacity = "1";
+              el.style.pointerEvents = "auto";
+            } else {
+              el.style.opacity = "0";
+              el.style.pointerEvents = "none";
+            }
+          } catch { /* ignore */ }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [globeRef, fields]);
+
+  return (
+    <div className="globe-markers">
+      {fields.filter((f) => f.center).map((f) => {
+        const sel = f.id === selectedId;
+        const fill = sel ? "#ffffff" : "#4caf50";
+        const dot = sel ? "#4caf50" : "#0a0a0a";
+        return (
+          <div
+            key={f.id}
+            ref={setEl(f.id)}
+            className={`globe-marker${sel ? " selected" : ""}`}
+            style={{ opacity: 0 }}
+            title={`${f.id} · ${getCropRu(f.crop)}`}
+            onClick={(e) => { e.stopPropagation(); onSelect(f.id); }}
+          >
+            <svg width={sel ? 32 : 26} height={sel ? 46 : 38} viewBox="0 0 28 40">
+              <path
+                d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 26 14 26s14-15.5 14-26C28 6.3 21.7 0 14 0z"
+                fill={fill}
+              />
+              <circle cx="14" cy="14" r="6" fill={dot} />
+            </svg>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 // Попап, привязанный к пину: каждый кадр пересчитывает экранные
 // координаты через getScreenCoords и двигает div напрямую через ref
@@ -93,43 +177,11 @@ function AnchoredPopup({ globeRef, field, onAnalyze }: {
   );
 }
 
-function createPinMesh(isSelected: boolean): THREE.Group {
-  const group = new THREE.Group();
-  const color = isSelected ? 0xffffff : 0x4caf50;
-
-  // Палочка — меньше
-  const stickGeo = new THREE.CylinderGeometry(0.0018, 0.0018, 0.018, 8);
-  const stickMat = new THREE.MeshBasicMaterial({ color });
-  const stick = new THREE.Mesh(stickGeo, stickMat);
-  stick.rotation.x = Math.PI / 2;
-  stick.position.z = 0.009;
-  group.add(stick);
-
-  // Шарик — меньше
-  const headGeo = new THREE.SphereGeometry(0.005, 12, 12);
-  const headMat = new THREE.MeshBasicMaterial({ color: isSelected ? 0x4caf50 : 0x1a1a1a });
-  const head = new THREE.Mesh(headGeo, headMat);
-  head.position.z = 0.021;
-  group.add(head);
-
-  // Невидимая, но кликабельная сфера-мишень.
-  // ВАЖНО: material.visible должен быть true, иначе raycaster её пропустит.
-  const hitGeo = new THREE.SphereGeometry(0.02, 8, 8);
-  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
-  const hit = new THREE.Mesh(hitGeo, hitMat);
-  hit.position.z = 0.012;
-  hit.name = "hitArea";
-  group.add(hit);
-
-  return group;
-}
-
 export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger }: Props) {
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
   const [popup, setPopup] = useState<{ field: Field } | null>(null);
-  const meshRefs = useRef<Map<string, THREE.Group>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -163,36 +215,13 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     return `${colors[d.level] || "#4caf50"}44`;
   }, []);
 
-  const pinData = useMemo(() =>
-    fields.filter((f) => f.center).map((f) => ({
-      id: f.id,
-      lat: f.center[0],
-      lng: f.center[1],
-      crop: f.crop,
-      area_ha: f.area_ha,
-      isSelected: f.id === selectedId,
-    })),
-  [fields, selectedId]);
-
-  const scaleFromAlt = useCallback((alt: number) => {
-    const t = Math.min(alt / 2, 1);
-    return 0.8 + t * 2.2;
-  }, []);
-
-  const updateScales = useCallback((alt: number) => {
-    const s = scaleFromAlt(alt);
-    meshRefs.current.forEach((mesh) => {
-      mesh.scale.set(s, s, s);
-    });
-  }, [scaleFromAlt]);
-
+  // Летим к полю
   useEffect(() => {
     if (!globeRef.current || !selectedId) return;
     const field = fields.find((f) => f.id === selectedId);
     if (!field) return;
     globeRef.current.pointOfView({ lat: field.center[0], lng: field.center[1], altitude: 0.004 }, 1600);
-    updateScales(0.004);
-  }, [selectedId, flyToTrigger, fields, updateScales]);
+  }, [selectedId, flyToTrigger, fields]);
 
   // Попап при любом выделении поля (сайдбар, полигон, пин).
   // Позицию каждый кадр считает сам AnchoredPopup, здесь только открываем.
@@ -206,8 +235,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     if (!globeRef.current || !regionCenter) return;
     if (selectedId) return;
     globeRef.current.pointOfView({ lat: regionCenter[0], lng: regionCenter[1], altitude: 0.9 }, 1000);
-    updateScales(0.9);
-  }, [regionCenter, selectedId, updateScales]);
+  }, [regionCenter, selectedId]);
 
   if (!ready || !GlobeComp) {
     return (
@@ -239,32 +267,19 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
         onGlobeClick={() => setPopup(null)}
-        customLayerData={pinData}
-        customThreeObject={(d: any) => {
-          const mesh = createPinMesh(d.isSelected);
-          mesh.userData = { fieldData: d };
-          meshRefs.current.set(d.id, mesh);
-          return mesh;
-        }}
-        customThreeObjectUpdate={(obj: any, d: any) => {
-          if (globeRef.current?.getCoords) {
-            const pos = globeRef.current.getCoords(d.lat, d.lng, 0);
-            obj.position.set(pos.x, pos.y, pos.z);
-          }
-        }}
-        // globe.gl вызывает onCustomLayerClick(data, event, coords),
-        // где data — элемент customLayerData (НЕ three-объект).
-        // Попап откроет эффект по selectedId, здесь только выделяем.
-        onCustomLayerClick={(d: any) => {
-          if (!d || !d.id) return;
-          onSelect(d.id);
-        }}
-        onCustomLayerHover={() => {}}
         controlGlobe={false}
         animateIn={true}
         width={undefined}
         height={undefined}
         style={{ width: "100%", height: "100%" }}
+      />
+
+      {/* HTML-маркеры Google Maps поверх WebGL */}
+      <MarkersOverlay
+        globeRef={globeRef}
+        fields={fields}
+        selectedId={selectedId}
+        onSelect={onSelect}
       />
 
       {popup && (
