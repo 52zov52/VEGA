@@ -43,6 +43,56 @@ function getCropRu(crop: string): string {
 
 export { getCropRu };
 
+// Попап, привязанный к пину: каждый кадр пересчитывает экранные
+// координаты через getScreenCoords и двигает div напрямую через ref
+// (без setState на каждый кадр), поэтому ходит за глобусом.
+function AnchoredPopup({ globeRef, field, onAnalyze }: {
+  globeRef: React.RefObject<any>;
+  field: Field;
+  onAnalyze: (id: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const g = globeRef.current;
+      const el = ref.current;
+      if (g?.getScreenCoords && el) {
+        try {
+          const p = g.getScreenCoords(field.center[0], field.center[1]);
+          if (p && typeof p.x === "number" && typeof p.y === "number") {
+            el.style.transform = `translate(-50%, -100%) translate(${p.x}px, ${p.y}px) translateY(-18px)`;
+            el.style.opacity = "1";
+          } else {
+            el.style.opacity = "0";
+          }
+        } catch { /* ignore */ }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [globeRef, field]);
+
+  return (
+    <div ref={ref} className="globe-popup-anchor" style={{ opacity: 0 }} onClick={(e) => e.stopPropagation()}>
+      <div className="globe-popup">
+        <div className="globe-popup-id">{field.id}</div>
+        <div className="globe-popup-crop">{getCropRu(field.crop)}</div>
+        <div className="globe-popup-area">{field.area_ha} га</div>
+        <button
+          className="globe-popup-btn"
+          onClick={(e) => { e.stopPropagation(); onAnalyze(field.id); }}
+        >
+          Анализ поля
+        </button>
+      </div>
+      <div className="globe-popup-arrow" />
+    </div>
+  );
+}
+
 function createPinMesh(isSelected: boolean): THREE.Group {
   const group = new THREE.Group();
   const color = isSelected ? 0xffffff : 0x4caf50;
@@ -78,7 +128,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
-  const [popup, setPopup] = useState<{ field: Field; x: number; y: number } | null>(null);
+  const [popup, setPopup] = useState<{ field: Field } | null>(null);
   const meshRefs = useRef<Map<string, THREE.Group>>(new Map());
 
   useEffect(() => {
@@ -144,19 +194,12 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     updateScales(0.004);
   }, [selectedId, flyToTrigger, fields, updateScales]);
 
-  // Попап при любом выделении поля (сайдбар, полигон, пин):
-  // ставим после долёта камеры, чтобы getScreenCoords дал точку назначения
+  // Попап при любом выделении поля (сайдбар, полигон, пин).
+  // Позицию каждый кадр считает сам AnchoredPopup, здесь только открываем.
   useEffect(() => {
     if (!selectedId) { setPopup(null); return; }
-    const t = setTimeout(() => {
-      const field = fields.find((f) => f.id === selectedId);
-      if (!field || !globeRef.current?.getScreenCoords) return;
-      try {
-        const coords = globeRef.current.getScreenCoords(field.center[0], field.center[1]);
-        if (coords) setPopup({ field, x: coords.x, y: coords.y });
-      } catch { /* ignore */ }
-    }, 1700);
-    return () => clearTimeout(t);
+    const field = fields.find((f) => f.id === selectedId);
+    if (field) setPopup({ field });
   }, [selectedId, flyToTrigger, fields]);
 
   useEffect(() => {
@@ -210,18 +253,11 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
           }
         }}
         // globe.gl вызывает onCustomLayerClick(data, event, coords),
-        // где data — элемент customLayerData (НЕ three-объект)
+        // где data — элемент customLayerData (НЕ three-объект).
+        // Попап откроет эффект по selectedId, здесь только выделяем.
         onCustomLayerClick={(d: any) => {
           if (!d || !d.id) return;
           onSelect(d.id);
-          const field = fields.find((f) => f.id === d.id);
-          const target: Field = field || { id: d.id, region_id: "", crop: d.crop || "", area_ha: d.area_ha || 0, center: [d.lat, d.lng] };
-          if (globeRef.current?.getScreenCoords) {
-            try {
-              const coords = globeRef.current.getScreenCoords(d.lat, d.lng);
-              if (coords) setPopup({ field: target, x: coords.x, y: coords.y });
-            } catch { /* ignore */ }
-          }
         }}
         onCustomLayerHover={() => {}}
         controlGlobe={false}
@@ -232,24 +268,11 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
       />
 
       {popup && (
-        <div
-          className="globe-popup-overlay"
-          style={{ left: popup.x, top: popup.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="globe-popup">
-            <div className="globe-popup-id">{popup.field.id}</div>
-            <div className="globe-popup-crop">{getCropRu(popup.field.crop)}</div>
-            <div className="globe-popup-area">{popup.field.area_ha} га</div>
-            <button
-              className="globe-popup-btn"
-              onClick={(e) => { e.stopPropagation(); onAnalyze(popup.field.id); setPopup(null); }}
-            >
-              Анализ поля
-            </button>
-          </div>
-          <div className="globe-popup-arrow" />
-        </div>
+        <AnchoredPopup
+          globeRef={globeRef}
+          field={popup.field}
+          onAnalyze={(id) => { onAnalyze(id); setPopup(null); }}
+        />
       )}
     </div>
   );

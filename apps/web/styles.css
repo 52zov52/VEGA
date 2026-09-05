@@ -654,6 +654,14 @@ button, .btn-primary, .btn-secondary, .btn-ghost {
 }
 
 /* ─── Globe Popup (HTML overlay, NOT inside WebGL) ─── */
+.globe-popup-anchor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 100;
+  pointer-events: auto;
+  will-change: transform;
+}
 .globe-popup-overlay {
   position: absolute;
   z-index: 100;
