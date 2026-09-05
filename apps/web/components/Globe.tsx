@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
 type Field = {
   id: string;
@@ -208,16 +208,39 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   // Слой «Контуры полей» скрывает полигоны целиком.
   // ВАЖНО: three-globe читает geoJson.type напрямую, поэтому кладём объект,
   // а не JSON-строку (строку он молча отбрасывает как unsupported).
-  const polygonData = (layers?.agriculture === false ? [] : fields)
-    .filter((f) => f.geometry?.coordinates)
-    .map((f) => ({
-      id: f.id,
-      level: f.level || "normal",
-      geoJsonGeometry: {
-        type: "Polygon",
-        coordinates: [f.geometry.coordinates[0]],
-      },
-    }));
+  // Плюс строгая валидация колец: битая геометрия отбрасывается до рендера.
+  const polygonData = useMemo(() => {
+    const list = layers?.agriculture === false ? [] : fields;
+    const out: any[] = [];
+    for (const f of list) {
+      const ring = f.geometry?.coordinates?.[0];
+      if (!Array.isArray(ring) || ring.length < 4) continue;
+      let ok = true;
+      let minLng = 180, maxLng = -180, minLat = 90, maxLat = -90;
+      for (const pt of ring) {
+        const lng = pt?.[0], lat = pt?.[1];
+        if (typeof lng !== "number" || typeof lat !== "number" || !isFinite(lng) || !isFinite(lat)) { ok = false; break; }
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      const w = maxLng - minLng, h = maxLat - minLat;
+      if (!ok || w <= 0 || h <= 0 || w > 10 || h > 10) {
+        // eslint-disable-next-line no-console
+        console.warn(`[vega] skip bad polygon ${f.id}: bbox ${w}x${h}`);
+        continue;
+      }
+      out.push({
+        id: f.id,
+        level: f.level || "normal",
+        geoJsonGeometry: { type: "Polygon", coordinates: [ring] },
+      });
+    }
+    // eslint-disable-next-line no-console
+    console.info(`[vega] polygons: ${out.length}/${list.length}`);
+    return out;
+  }, [fields, layers]);
 
   // Слой «Заливка» включает/выключает заливку полигонов (контуры остаются)
   const polyCapColor = useCallback((d: any) => {
@@ -278,7 +301,8 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonGeoJsonGeometry="geoJsonGeometry"
         polygonCapColor={polyCapColor}
         polygonSideColor={polySideColor}
-        polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffaa" : "transparent"}
+        polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffaa" : ""}
+        polygonsTransitionDuration={0}
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => { if (!drawMode) onSelect(d.id); }}
