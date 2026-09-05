@@ -47,18 +47,28 @@ function createPinMesh(isSelected: boolean): THREE.Group {
   const group = new THREE.Group();
   const color = isSelected ? 0xffffff : 0x4caf50;
 
-  const stickGeo = new THREE.CylinderGeometry(0.005, 0.005, 0.06, 8);
+  // Маленькая палочка
+  const stickGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.03, 8);
   const stickMat = new THREE.MeshBasicMaterial({ color });
   const stick = new THREE.Mesh(stickGeo, stickMat);
   stick.rotation.x = Math.PI / 2;
-  stick.position.z = 0.03;
+  stick.position.z = 0.015;
   group.add(stick);
 
-  const headGeo = new THREE.SphereGeometry(0.015, 16, 16);
+  // Маленький шарик
+  const headGeo = new THREE.SphereGeometry(0.008, 12, 12);
   const headMat = new THREE.MeshBasicMaterial({ color: isSelected ? 0x4caf50 : 0x1a1a1a });
   const head = new THREE.Mesh(headGeo, headMat);
-  head.position.z = 0.065;
+  head.position.z = 0.034;
   group.add(head);
+
+  // Невидимая сфера-мишень для клика (больше, чтобы raycaster попадал)
+  const hitGeo = new THREE.SphereGeometry(0.025, 8, 8);
+  const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+  const hit = new THREE.Mesh(hitGeo, hitMat);
+  hit.position.z = 0.02;
+  hit.name = "hitArea";
+  group.add(hit);
 
   return group;
 }
@@ -113,15 +123,11 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     })),
   [fields, selectedId]);
 
-  // Вычислить scale из altitude
   const scaleFromAlt = useCallback((alt: number) => {
-    // alt: 0 (surface) → 2+ (far)
-    // scale: 1 (close, default pin size) → 10 (far, big pins)
     const t = Math.min(alt / 2, 1);
     return 1 + t * 9;
   }, []);
 
-  // Обновить scale всех пинов
   const updateScales = useCallback((alt: number) => {
     const s = scaleFromAlt(alt);
     meshRefs.current.forEach((mesh) => {
@@ -129,7 +135,6 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     });
   }, [scaleFromAlt]);
 
-  // Летим к полю
   useEffect(() => {
     if (!globeRef.current || !selectedId) return;
     const field = fields.find((f) => f.id === selectedId);
@@ -138,7 +143,6 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     updateScales(0.004);
   }, [selectedId, flyToTrigger, fields, updateScales]);
 
-  // Летим к региону
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;
     if (selectedId) return;
@@ -156,7 +160,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   }
 
   return (
-    <div className="globe-container">
+    <div className="globe-container" onClick={() => setPopup(null)}>
       <GlobeComp
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
@@ -189,7 +193,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
           }
         }}
         onCustomLayerClick={(obj: any) => {
-          const d = obj.userData?.fieldData;
+          const d = obj?.userData?.fieldData || obj?.parent?.userData?.fieldData;
           if (!d) return;
           onSelect(d.id);
           if (globeRef.current?.getScreenCoords) {
