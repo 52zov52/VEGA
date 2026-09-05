@@ -102,8 +102,8 @@ function MarkersOverlay({ globeRef, fields, selectedId, onSelect }: {
     <div className="globe-markers">
       {fields.filter((f) => f.center).map((f) => {
         const sel = f.id === selectedId;
-        const fill = sel ? "#ffffff" : "#4caf50";
-        const dot = sel ? "#4caf50" : "#0a0a0a";
+        const fill = sel ? "#ede9db" : "#c9a227";
+        const dot = sel ? "#c9a227" : "#0a0d0b";
         return (
           <div
             key={f.id}
@@ -206,13 +206,13 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     }));
 
   const polyCapColor = useCallback((d: any) => {
-    const colors: Record<string, string> = { critical: "#f44336", stress: "#ff9800", watch: "#29b6f6" };
-    return `${colors[d.level] || "#4caf50"}22`;
+    const colors: Record<string, string> = { critical: "#c05b4d", stress: "#c9973f", watch: "#7fa8b8" };
+    return `${colors[d.level] || "#7fa650"}22`;
   }, []);
 
   const polySideColor = useCallback((d: any) => {
-    const colors: Record<string, string> = { critical: "#f44336", stress: "#ff9800", watch: "#29b6f6" };
-    return `${colors[d.level] || "#4caf50"}44`;
+    const colors: Record<string, string> = { critical: "#c05b4d", stress: "#c9973f", watch: "#7fa8b8" };
+    return `${colors[d.level] || "#7fa650"}44`;
   }, []);
 
   // Летим к полю
@@ -262,7 +262,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonGeoJsonGeometry="geoJsonGeometry"
         polygonCapColor={polyCapColor}
         polygonSideColor={polySideColor}
-        polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffaa" : "transparent"}
+        polygonStrokeColor={(d: any) => d.id === selectedId ? "#ede9dbcc" : "transparent"}
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}

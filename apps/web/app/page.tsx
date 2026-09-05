@@ -143,34 +143,34 @@ export default function Page() {
       backgroundColor: "transparent",
       tooltip: {
         trigger: "axis",
-        backgroundColor: "#181d17ee",
-        borderColor: "#2a3029",
-        textStyle: { color: "#f2f4ec", fontSize: 12 },
+        backgroundColor: "#141914ee",
+        borderColor: "#3a4238",
+        textStyle: { color: "#ece9dc", fontSize: 12 },
       },
       legend: {
-        textStyle: { color: "#a8b09f", fontSize: 11 },
+        textStyle: { color: "#a4a998", fontSize: 11 },
         top: 0,
         itemGap: 16,
       },
       grid: { left: 50, right: 50, bottom: 30, top: 40 },
       xAxis: {
         type: "category", data: ts.map((p) => p.date),
-        axisLine: { lineStyle: { color: "#2a3029" } },
-        axisLabel: { color: "#a8b09f", fontSize: 10 },
+        axisLine: { lineStyle: { color: "#242b23" } },
+        axisLabel: { color: "#6d7367", fontSize: 10 },
       },
       yAxis: [
         {
           type: "value", name: "NDVI",
-          nameTextStyle: { color: "#a8b09f", fontSize: 10 },
-          axisLine: { lineStyle: { color: "#2a3029" } },
-          axisLabel: { color: "#a8b09f", fontSize: 10 },
-          splitLine: { lineStyle: { color: "#1e241c" } },
+          nameTextStyle: { color: "#6d7367", fontSize: 10 },
+          axisLine: { lineStyle: { color: "#242b23" } },
+          axisLabel: { color: "#6d7367", fontSize: 10 },
+          splitLine: { lineStyle: { color: "#1a2019" } },
         },
         {
           type: "value", name: "мм",
-          nameTextStyle: { color: "#a8b09f", fontSize: 10 },
-          axisLine: { lineStyle: { color: "#2a3029" } },
-          axisLabel: { color: "#a8b09f", fontSize: 10 },
+          nameTextStyle: { color: "#6d7367", fontSize: 10 },
+          axisLine: { lineStyle: { color: "#242b23" } },
+          axisLabel: { color: "#6d7367", fontSize: 10 },
           splitLine: { show: false },
         },
       ],
@@ -178,28 +178,28 @@ export default function Page() {
         ...(layers.ndvi ? [{
           name: "NDVI", type: "line", data: ts.map((p) => p.ndvi_observed),
           smooth: true, symbol: "none",
-          lineStyle: { width: 2.5, color: "#7cc46a" },
+          lineStyle: { width: 2.5, color: "#7fa650" },
           areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: "#7cc46a33" },
-            { offset: 1, color: "#7cc46a05" },
+            { offset: 0, color: "#7fa65033" },
+            { offset: 1, color: "#7fa65005" },
           ]) },
         }] : []),
         {
           name: "Норма", type: "line", data: ts.map((p) => p.ndvi_climatology),
-          lineStyle: { type: "dashed", color: "#a8b09f", width: 1.5 },
+          lineStyle: { type: "dashed", color: "#6d7367", width: 1.5 },
           symbol: "none",
         },
         {
           name: "Осадки", type: "bar", yAxisIndex: 1,
           data: ts.map((p) => p.precipitation),
-          itemStyle: { color: "#6aa9c444" },
+          itemStyle: { color: "#7fa8b844" },
           barWidth: "40%",
         },
         ...(layers.anomaly ? [{
           name: "Аномалия", type: "scatter",
           data: ts.filter((p) => p.anomaly).map((p) => [p.date, p.ndvi_observed]),
           symbolSize: 10,
-          itemStyle: { color: "#e05c5c", borderColor: "#e05c5c88", borderWidth: 2 },
+          itemStyle: { color: "#c05b4d", borderColor: "#c05b4d88", borderWidth: 2 },
         }] : []),
       ],
     });
@@ -262,9 +262,12 @@ export default function Page() {
       {/* Header */}
       <header className="header">
         <div className="header-brand">
-          <span className="header-logo">◇</span>
-          <span className="header-title">VEGA</span>
-          <span className="header-sub">Мониторинг вегетации</span>
+          <span className="header-logo"><i>В</i></span>
+          <span className="header-title">ВЕГА</span>
+          <span className="header-sub">Единый агрореестр · мониторинг вегетации</span>
+        </div>
+        <div className="header-actions">
+          <span className="header-stamp">Реестровая система</span>
         </div>
       </header>
 
