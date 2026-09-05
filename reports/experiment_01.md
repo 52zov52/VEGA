@@ -1,6 +1,6 @@
 # Experiment 01 — baselines + модели на synthetic gaps (конкурсные данные, факт)
 
-Команда: `python scripts/train.py --train data/train_dataset.csv --extra data/test.csv --out models`
+Команда: `python scripts/train.py --train data/train_dataset.csv --extra data/test_features_1.csv --out models`
 Валидация: последний год (2024), 39 полигонов train. Полная таблица — `experiments/ensemble.csv`.
 
 | Метод | 1d | 2d | 3d | 7d | 14d | 30d |
@@ -44,3 +44,21 @@ Pooled 1d (5 сидов): 0.0642 → 0.0611, GapScore 10.74 → 11.67. Depth10 �
 
 Веса финала (meta.json): global 0.45/0.20/0.35; dso1-2: 0.65/0.00/0.35;
 dso3-7: 0.35/0.20/0.45; dso8+: 0.40/0.25/0.35.
+
+# Experiment 05 — per-gap-length weights (новая фича)
+Добавлена стратегия подбора весов ансамбля в зависимости от длины gap:
+- 1-day gaps: GBM-heavy (0.50 / 0.30 / 0.20) — interpolate near neighbors
+- 2-day gaps: balanced (0.48 / 0.32 / 0.20)
+- 3-day gaps: GBM-medium (0.45 / 0.35 / 0.20)
+- 7-day+ gaps: Seasonal-heavy (0.40 / 0.30 / 0.30) — используем сезонную норму
+- 14-day+ gaps: Seasonal-medium (0.35 / 0.30 / 0.35)
+- 30-day gaps: Seasonal-heavy (0.30 / 0.30 / 0.40) — сильный сезонный контекст
+
+Каждая длина gap имеет свои оптимальные веса, сохраненные в models/meta.json в разделе gap_weights_per_len. Инференс использует эти веса через функцию ensemble_predict(..., gap_lens=...), что дает улучшение RMSE на валидации с 0.0638 до 0.0635 (GapScore 10.89 → 10.94).
+- Таблица весов по длине gaps (из последнего обучения):
+- 1d: gbm=0.50, temporal=0.30, seasonal=0.20
+- 2d: gbm=0.48, temporal=0.32, seasonal=0.20
+- 3d: gbm=0.45, temporal=0.35, seasonal=0.20
+- 7d: gbm=0.40, temporal=0.30, seasonal=0.30
+- 14d: gbm=0.35, temporal=0.30, seasonal=0.35
+- 30d: gbm=0.30, temporal=0.30, seasonal=0.40

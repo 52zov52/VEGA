@@ -36,9 +36,11 @@ class GBMModel:
                 from catboost import CatBoostRegressor
 
                 self.model = CatBoostRegressor(
-                    iterations=2500, depth=8, learning_rate=0.02,
+                    iterations=3000, depth=6, learning_rate=0.01,
                     loss_function="RMSE", random_seed=self.seed, verbose=False,
-                    early_stopping_rounds=150,
+                    early_stopping_rounds=200,
+                    l2_leaf_reg=3,
+                    border_count=255,
                 )
                 n = len(Xn)
                 cut = max(int(n * 0.9), n - 5000)
@@ -54,9 +56,9 @@ class GBMModel:
                 from lightgbm import LGBMRegressor
 
                 self.model = LGBMRegressor(
-                    n_estimators=5000, num_leaves=31,
-                    learning_rate=0.02, subsample=0.85, colsample_bytree=0.7,
-                    min_child_samples=100, reg_lambda=5.0,
+                    n_estimators=6000, num_leaves=31,
+                    learning_rate=0.01, subsample=0.8, colsample_bytree=0.7,
+                    min_child_samples=200, reg_lambda=10.0,
                     random_state=self.seed, verbose=-1,
                 )
                 n = len(Xn)
@@ -64,7 +66,7 @@ class GBMModel:
                 self.model.fit(
                     Xn.iloc[:cut], y.iloc[:cut],
                     eval_X=Xn.iloc[cut:], eval_y=y.iloc[cut:],
-                    callbacks=[lgb.early_stopping(150, verbose=False)],
+                    callbacks=[lgb.early_stopping(200, verbose=False)],
                 )
                 self.used_backend = "lightgbm"
                 return self
@@ -74,8 +76,8 @@ class GBMModel:
         from sklearn.ensemble import HistGradientBoostingRegressor
 
         self.model = HistGradientBoostingRegressor(
-            max_iter=800, max_depth=10, learning_rate=0.04,
-            l2_regularization=2.0, early_stopping="auto", random_state=self.seed,
+            max_iter=1200, max_depth=8, learning_rate=0.03,
+            l2_regularization=5.0, early_stopping="auto", random_state=self.seed,
         )
         self.model.fit(Xn, y)
         self.used_backend = "sklearn-hgb"

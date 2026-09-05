@@ -43,13 +43,13 @@ cd apps/web && npm run dev
 ## 6. Load datasets
 
 Положите конкурсный файл в `data/train_dataset.csv` (колонки `anon_polygon_id,date,primary_ndvi,...`)
-и скрытый тест в `data/test.csv` (скоринг — строки с `is_synthetic_gap=True`).
+и скрытый тест в `data/test_features_1.csv` (новая версия датасета, скоринг — строки с `is_synthetic_gap=True`).
 Без них используется встроенный demo-генератор. `data/*.csv` в git не коммитятся.
 
 ## 7. Run model
 
 ```bash
-py scripts/train.py --train data/train_dataset.csv --extra data/test.csv --out models
+py scripts/train.py --train data/train_dataset.csv --extra data/test_features_1.csv --out models
 # --extra добавляет известные строки теста в финальный фит (валидация остаётся на train);
 # без файлов — обучение на demo-датасете; результат: models/*.joblib + meta.json
 # факт contest: valid 1d RMSE 0.0636, GapScore 10.91 (pooled 3 сида + стратификация dso); таблица: experiments/ensemble.csv
@@ -58,7 +58,7 @@ py scripts/train.py --train data/train_dataset.csv --extra data/test.csv --out m
 ## 8. Generate submission
 
 ```bash
-py scripts/make_submission.py --test data/test.csv --out submission.csv
+py scripts/make_submission.py --test data/test_features_1.csv --out submission.csv
 py scripts/validate_submission.py submission.csv
 ```
 

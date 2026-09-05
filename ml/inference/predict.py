@@ -35,18 +35,22 @@ def load_artifacts(model_dir: str | Path) -> dict | None:
         bundle["feature_cols"] = meta.get("feature_cols", [])
         raw_bins = meta.get("weights_by_bin") or {}
         bundle["weights_by_bin"] = {k: EnsembleWeights(**v) for k, v in raw_bins.items()}
+        # НОВОЕ: Per-gap-length weights
+        bundle["gap_weights_per_len"] = meta.get("gap_weights_per_len", {})
     else:
         bundle["weights"] = EnsembleWeights()
         bundle["weights_by_bin"] = {}
         bundle["feature_cols"] = []
+        bundle["gap_weights_per_len"] = {}
     return bundle
 
 
-def predict_gaps(df: pd.DataFrame, artifacts: dict, clim=None) -> pd.Series:
+def predict_gaps(df: pd.DataFrame, artifacts: dict, clim=None, gap_lens: np.ndarray | None = None) -> pd.Series:
     """Возвращает Series восстановленного target в порядке входного df.
 
     clim: fitted PastClimatology (валидация — только train-история).
     По умолчанию fitted на истинно известных строках входа.
+    gap_lens: массив длин gaps для каждой строки (опционально).
     """
     from services.climatology.climatology import PastClimatology
 
@@ -69,7 +73,7 @@ def predict_gaps(df: pd.DataFrame, artifacts: dict, clim=None) -> pd.Series:
     p_tmp = np.asarray(artifacts["temporal"].predict(feat), dtype=float)
     p_sea = baseline_seasonal(work).to_numpy(dtype=float)
     # Стратификация по давности наблюдения (past-only признак, без утечек):
-    # порядок feat совпадает с порядком ens, как и раньше для work.index.
+    # порядок feat совпадает с порядок ens, как и раньше для work.index.
     dso = feat["days_since_obs"].to_numpy() if "days_since_obs" in feat else None
     ens = apply_stratified(p_gbm, p_tmp, p_sea, dso,
                            artifacts.get("weights_by_bin"), artifacts.get("weights"))

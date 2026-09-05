@@ -108,7 +108,7 @@ def _build_frame(df: pd.DataFrame, clim=None) -> pd.DataFrame:
     temp = _resolve(out, ["temperature", "era5_temp_c"]).astype(float)
     rain = _resolve(out, ["precipitation", "era5_precip_mm"]).astype(float)
     temp = temp.interpolate("linear", limit_direction="both").ffill().bfill()
-    rain = rain.fillna(0.0)
+    rain = rain.ffill().fillna(0.0)
     out["_temp_f"] = temp
     out["_rain_f"] = rain
     gt = out.groupby("polygon_id", sort=False)["_temp_f"]

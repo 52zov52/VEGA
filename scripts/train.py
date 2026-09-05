@@ -2,7 +2,7 @@
 
 Использование:
     python scripts/train.py --train data/train_dataset.csv --out models
-    python scripts/train.py --train data/train_dataset.csv --extra data/test.csv --out models
+    python scripts/train.py --train data/train_dataset.csv --extra data/test_features_1.csv --out models
 
 --extra: известные (не скрытые) строки теста добавляются ТОЛЬКО в финальный
 фит (валидация остаётся честной — на train-сплитах). Скрытые значения
@@ -34,7 +34,7 @@ from ml.evaluation.metrics import gap_score, rmse  # noqa: E402
 from ml.evaluation.splits import time_forward_splits  # noqa: E402
 from ml.features.build import FEATURES_VERSION, build_features  # noqa: E402
 from ml.models.baselines import baseline_linear, baseline_nearest, baseline_seasonal  # noqa: E402
-from ml.models.ensemble import EnsembleWeights, apply_stratified, dso_bin_names, DSO_BINS, ensemble_predict, grid_search_weights  # noqa: E402
+from ml.models.ensemble import EnsembleWeights, EnsembleWeightsPerGap, apply_stratified, dso_bin_names, DSO_BINS, ensemble_predict, grid_search_weights  # noqa: E402
 from ml.models.gbm import GBMModel  # noqa: E402 (бэкенд внутри ResidualGBM)
 from ml.models.residual import ResidualGBM  # noqa: E402
 from ml.models.temporal import TemporalModel  # noqa: E402
@@ -194,7 +194,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", default=None)
     ap.add_argument("--extra", default=None,
-                    help="CSV с известными строками (напр. data/test.csv) только для финального фита")
+                    help="CSV с известными строками (напр. data/test_features (1).csv) только для финального фита")
     ap.add_argument("--out", default="models")
     args = ap.parse_args()
     t0 = time.time()
@@ -237,6 +237,45 @@ def main() -> None:
           f"sea={wrep['sea']:.4f} ens_global={wrep['ens_global']:.4f} ens_strat={wrep['ens_strat']:.4f} "
           f"gap_score={gap_score(wrep['ens_strat'])}")
 
+    # НОВОЕ: Подбор per-gap-length weights на каждом gap length separately
+    from ml.models.ensemble import EnsembleWeightsPerGap
+    gap_weights = EnsembleWeightsPerGap()
+    for gap_len in GAP_GRID:
+        masked = mask_random_gaps(valid_df, gap_len=gap_len, n_gaps=30, seed=42 + gap_len)
+        if not masked["is_synthetic_gap"].any():
+            continue
+        sel = masked["is_synthetic_gap"].to_numpy()
+        y_true = masked.loc[sel, TARGET_COL].values.astype(float)
+        art = {"gbm": gbm, "temporal": temporal,
+               "weights": EnsembleWeights(1, 0, 0), "feature_cols": cols}
+        from ml.inference.predict import predict_gaps as _pg
+        p_gbm = _pg(masked, art, clim=clim_train).to_numpy(float)[sel]
+        p_tmp = _pg(masked, {**art, "weights": EnsembleWeights(0, 1, 0)}, clim=clim_train).to_numpy(float)[sel]
+        # seasonal baseline values
+        sea_vals: list[float] = []
+        for _, sub in masked.groupby("polygon_id"):
+            sea_vals += baseline_seasonal(sub)[sub["is_synthetic_gap"].to_numpy()].tolist()
+        p_sea = np.asarray(sea_vals, dtype=float)[sel[:len(sea_vals)]] if sel.size <= len(sea_vals) else np.array([])
+        if len(p_sea) > 0 and len(p_gbm) > 0:
+            # Приводим к одной длине
+            min_len = min(len(p_gbm), len(p_tmp), len(p_sea))
+            sw = grid_search_weights(y_true[:min_len] if hasattr(y_true, '__len__') else y_true,
+                                     p_gbm[:min_len], p_tmp[:min_len], p_sea[:min_len])
+            print(f"per-gap {gap_len}d optimal: gbm={sw.w_gbm:.2f} temporal={sw.w_temporal:.2f} seasonal={sw.w_seasonal:.2f}")
+            # Сохраним в соответствующий атрибут
+            if gap_len == 1:
+                gap_weights.gap_1d = EnsembleWeights(sw.w_gbm, sw.w_temporal, sw.w_seasonal)
+            elif gap_len == 2:
+                gap_weights.gap_2d = EnsembleWeights(sw.w_gbm, sw.w_temporal, sw.w_seasonal)
+            elif gap_len == 3:
+                gap_weights.gap_3d = EnsembleWeights(sw.w_gbm, sw.w_temporal, sw.w_seasonal)
+            elif gap_len == 7:
+                gap_weights.gap_7d = EnsembleWeights(sw.w_gbm, sw.w_temporal, sw.w_seasonal)
+            elif gap_len == 14:
+                gap_weights.gap_14d = EnsembleWeights(sw.w_gbm, sw.w_temporal, sw.w_seasonal)
+            elif gap_len == 30:
+                gap_weights.gap_30d = EnsembleWeights(sw.w_gbm, sw.w_temporal, sw.w_seasonal)
+
     models = {"gbm": gbm, "temporal": temporal, "weights": weights,
               "weights_by_bin": weights_by_bin, "feature_cols": cols}
     table: dict[str, dict[str, float]] = {}
@@ -268,6 +307,14 @@ def main() -> None:
         "model": f"ensemble({gbm_f.used_backend}+{temporal_f.used_backend}+seasonal)",
         "split": "time_forward", "weights": vars(weights.normalized()),
         "weights_by_bin": {k: vars(v.normalized()) for k, v in weights_by_bin.items()},
+        "gap_weights_per_len": {
+            "1d": vars(gap_weights.gap_1d.normalized()) if gap_weights.gap_1d else None,
+            "2d": vars(gap_weights.gap_2d.normalized()) if gap_weights.gap_2d else None,
+            "3d": vars(gap_weights.gap_3d.normalized()) if gap_weights.gap_3d else None,
+            "7d": vars(gap_weights.gap_7d.normalized()) if gap_weights.gap_7d else None,
+            "14d": vars(gap_weights.gap_14d.normalized()) if gap_weights.gap_14d else None,
+            "30d": vars(gap_weights.gap_30d.normalized()) if gap_weights.gap_30d else None,
+        },
         "feature_cols": cols_f,
         "score_valid_1d": final_rmse, "gap_score_valid_1d": gap_score(final_rmse),
         "train_time_s": round(time.time() - t0, 1),

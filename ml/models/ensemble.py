@@ -1,11 +1,13 @@
 """Финальный ансамбль (§9): w1*GBM + w2*Temporal + w3*Seasonal.
 
-Веса подбираются на validation перебором по сетке (см. scripts/train.py),
+Веса подбираются на validation перебором (см. scripts/train.py),
 по умолчанию — из .env (0.55 / 0.30 / 0.15). Клиппинг в [0, 1].
+
+Поддержка per-gap-length и per-DSO-and-gap-length весов.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -23,26 +25,75 @@ class EnsembleWeights:
         return EnsembleWeights(self.w_gbm / s, self.w_temporal / s, self.w_seasonal / s)
 
 
+@dataclass
+class EnsembleWeightsPerGap:
+    """Веса per gap length category."""
+    gap_1d: EnsembleWeights = field(default_factory=lambda: EnsembleWeights(0.50, 0.30, 0.20))
+    gap_2d: EnsembleWeights = field(default_factory=lambda: EnsembleWeights(0.48, 0.32, 0.20))
+    gap_3d: EnsembleWeights = field(default_factory=lambda: EnsembleWeights(0.45, 0.35, 0.20))
+    gap_7d: EnsembleWeights = field(default_factory=lambda: EnsembleWeights(0.40, 0.30, 0.30))
+    gap_14d: EnsembleWeights = field(default_factory=lambda: EnsembleWeights(0.35, 0.30, 0.35))
+    gap_30d: EnsembleWeights = field(default_factory=lambda: EnsembleWeights(0.30, 0.30, 0.40))
+
+    def get_weights(self, gap_len: int) -> EnsembleWeights:
+        """Получить веса для данной длины gap."""
+        if gap_len <= 1:
+            return self.gap_1d.normalized()
+        elif gap_len <= 2:
+            return self.gap_2d.normalized()
+        elif gap_len <= 3:
+            return self.gap_3d.normalized()
+        elif gap_len <= 7:
+            return self.gap_7d.normalized()
+        elif gap_len <= 14:
+            return self.gap_14d.normalized()
+        else:
+            return self.gap_30d.normalized()
+
+
 def ensemble_predict(
     p_gbm: np.ndarray,
     p_temporal: np.ndarray,
     p_seasonal: np.ndarray,
-    weights: EnsembleWeights | None = None,
+    weights: EnsembleWeights | EnsembleWeightsPerGap | None = None,
+    gap_lens: np.ndarray | None = None,
 ) -> np.ndarray:
-    w = (weights or EnsembleWeights()).normalized()
-    gbm = np.asarray(p_gbm, dtype=float)
-    tmp = np.asarray(p_temporal, dtype=float)
-    sea = np.asarray(p_seasonal, dtype=float)
-    # Устойчивость к NaN компонентов: 0 * NaN = NaN, поэтому веса
-    # перераспределяются на доступные компоненты (важно для полностью
-    # скрытых рядов, где seasonal не может построиться).
-    ws = np.array([w.w_gbm, w.w_temporal, w.w_seasonal], dtype=float)
-    stack = np.vstack([gbm, tmp, sea])
-    valid = np.isfinite(stack)
-    wsum = (valid * ws[:, None]).sum(axis=0)
-    out = (np.where(valid, stack, 0.0) * ws[:, None]).sum(axis=0)
-    out = np.divide(out, wsum, out=np.full_like(out, 0.5), where=wsum > 0)
-    return np.clip(out, 0.0, 1.0)
+    """Взвешенный ансамбль.
+
+    Если weights — EnsembleWeightsPerGap и передалены gap_lens,
+    выбираются веса в зависимости от длины gap.
+    """
+    if isinstance(weights, EnsembleWeightsPerGap) and gap_lens is not None:
+        ws_list = []
+        for gl in gap_lens:
+            w = weights.get_weights(int(gl)).normalized()
+            ws_list.append((w.w_gbm, w.w_temporal, w.w_seasonal))
+        # Векторized approach: apply per-row weights
+        out = np.full_like(p_gbm, np.nan, dtype=float)
+        for i in range(len(gap_lens)):
+            wgbm, wtem, wsea = ws_list[i]
+            gbm_i = np.asarray(p_gbm[i], dtype=float)
+            tmp_i = np.asarray(p_temporal[i], dtype=float)
+            sea_i = np.asarray(p_seasonal[i], dtype=float)
+            ws = np.array([wgbm, wtem, wsea], dtype=float)
+            stack = np.vstack([gbm_i, tmp_i, sea_i])
+            valid = np.isfinite(stack)
+            wsum = (valid * ws[:, None]).sum(axis=0)
+            comp = (np.where(valid, stack, 0.0) * ws[:, None]).sum(axis=0)
+            out[i] = np.divide(comp, wsum, out=np.full(1, 0.5), where=wsum > 0)
+        return np.clip(out, 0.0, 1.0)
+    else:
+        w = (weights or EnsembleWeights()).normalized()
+        gbm = np.asarray(p_gbm, dtype=float)
+        tmp = np.asarray(p_temporal, dtype=float)
+        sea = np.asarray(p_seasonal, dtype=float)
+        ws = np.array([w.w_gbm, w.w_temporal, w.w_seasonal], dtype=float)
+        stack = np.vstack([gbm, tmp, sea])
+        valid = np.isfinite(stack)
+        wsum = (valid * ws[:, None]).sum(axis=0)
+        out = (np.where(valid, stack, 0.0) * ws[:, None]).sum(axis=0)
+        out = np.divide(out, wsum, out=np.full_like(out, 0.5), where=wsum > 0)
+        return np.clip(out, 0.0, 1.0)
 
 
 def grid_search_weights(
