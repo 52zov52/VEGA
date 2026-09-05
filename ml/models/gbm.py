@@ -36,9 +36,9 @@ class GBMModel:
                 from catboost import CatBoostRegressor
 
                 self.model = CatBoostRegressor(
-                    iterations=1500, depth=6, learning_rate=0.03,
+                    iterations=2500, depth=8, learning_rate=0.02,
                     loss_function="RMSE", random_seed=self.seed, verbose=False,
-                    early_stopping_rounds=100,
+                    early_stopping_rounds=150,
                 )
                 n = len(Xn)
                 cut = max(int(n * 0.9), n - 5000)

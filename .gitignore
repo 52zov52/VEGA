@@ -16,6 +16,8 @@ catboost_info/
 data/raw/
 data/cache/
 data/*.csv
+data/polygons.json
+data/regions.json
 doc-*.csv
 doc-*.zip
 submission*.csv

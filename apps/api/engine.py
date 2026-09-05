@@ -5,6 +5,8 @@ from datetime import date
 from pathlib import Path
 
 import joblib
+import math
+import numpy as np
 import pandas as pd
 
 MODEL_DIR = Path("./models")
@@ -45,8 +47,16 @@ def run_analysis(polygon: dict, start: date, end: date, lat: float = 47.2, lon: 
         sat_source = "demo(fallback)"
     if sat_source.startswith("demo"):
         warnings.append("Использован demo-источник спутниковых данных (offline режим)")
-    # 3. погода
-    weather_df, weather_ok = fetch_weather(lat, lon, start, end)
+        try:
+            from pipelines.satellite.providers import SentinelHubStatProvider
+
+            reason = SentinelHubStatProvider.last_error
+            if reason:
+                warnings.append(f"Sentinel Hub недоступен ({reason}) — показан demo-ряд")
+        except Exception:
+            pass
+    # 3. погода: Open-Meteo (архив/прогноз) -> NASA POWER -> satellite-only
+    weather_df, weather_ok, weather_source = fetch_weather(lat, lon, start, end)
     if not weather_ok:
         warnings.append("Weather confirmation unavailable — anomaly engine в satellite-only режиме")
     elif weather_df is not None and len(weather_df):
@@ -79,6 +89,9 @@ def run_analysis(polygon: dict, start: date, end: date, lat: float = 47.2, lon: 
     # 6. климатология + аномалии
     clim = build_climatology(restored)
     scored, events = detect_anomalies(restored, clim)
+    # сначала тяжёлые: critical > stress > watch, внутри — по оценке
+    rank = {"critical": 0, "stress": 1, "watch": 2}
+    events = sorted(events, key=lambda e: (rank.get(e.get("level", "watch"), 3), -float(e.get("anomaly_score", 0))))
     explanations = [explain_event(e, scored.rename(columns={TARGET_COL: "primary_ndvi"}),
                                   weather_available=weather_ok) for e in events[:10]]
     # KPI для карточки поля (§21)
@@ -92,15 +105,27 @@ def run_analysis(polygon: dict, start: date, end: date, lat: float = 47.2, lon: 
             "data_quality": round(float(latest.get("data_quality", 1.0)), 3),
             "level": str(latest.get("level", "normal")),
         }
+        # NaN не сериализуется в JSON (был 500 на крошечных окнах) — только null
+        kpi = {k: (None if isinstance(v, float) and not math.isfinite(v) else v)
+               for k, v in kpi.items()}
     timeseries = [{
         "date": str(r["date"]), "ndvi_observed": _f(r.get(TARGET_COL)),
         "ndvi_restored": _f(r.get(TARGET_COL)), "ndvi_climatology": _f(r.get("clim_mean")),
         "evi": _f(r.get("evi")), "ndwi": _f(r.get("ndwi")),
         "precipitation": _f(r.get("precipitation")), "anomaly": bool(r.get("level") in ("stress", "critical")),
     } for _, r in scored.sort_values("date").tail(400).iterrows()]
+    # статистика конвейера: сколько точек, сколько дыр закрыли, за какой период
+    clean_gaps = int(clean[TARGET_COL].isna().sum()) if TARGET_COL in clean else 0
+    dates = pd.to_datetime(scored["date"]) if len(scored) else pd.Series([], dtype="datetime64[ns]")
+    stats = {
+        "points": int(len(scored)),
+        "gaps_filled": clean_gaps,
+        "date_min": str(dates.min().date()) if len(dates) else None,
+        "date_max": str(dates.max().date()) if len(dates) else None,
+    }
     return {"kpi": kpi, "timeseries": timeseries, "anomalies": events,
-            "explanations": explanations, "warnings": warnings,
-            "sources": {"satellite": sat_source, "weather": "open-meteo" if weather_ok else "satellite-only",
+            "explanations": explanations, "warnings": warnings, "stats": stats,
+            "sources": {"satellite": sat_source, "weather": weather_source if weather_ok else "satellite-only",
                         "restore": restore_method}}
 
 
@@ -110,3 +135,47 @@ def _f(v) -> float | None:
         return round(f, 4) if pd.notna(v) else None
     except (TypeError, ValueError):
         return None
+
+
+def forecast_from_timeseries(ts: list[dict], horizon: int = 14) -> list[dict]:
+    """Краткосрочный прогноз NDVI (экспериментальный, §доп): недавний тренд,
+    смешанный с ходом климатологии + расширяющийся коридор неопределённости.
+
+    Не ML-модель, а прозрачная эвристика для планирования выездов:
+    при устойчивом падении покажет продолжение спада, при норме — плато.
+    """
+    pts = [(str(p.get("date")), p.get("ndvi_observed"), p.get("ndvi_climatology"))
+           for p in (ts or [])]
+    pts = [(d, o, c) for d, o, c in pts
+           if o is not None and pd.notna(o)]
+    if len(pts) < 4:
+        raise ValueError("мало точек для прогноза (нужно ≥ 4)")
+    dates = pd.to_datetime([p[0] for p in pts])
+    steps = np.diff(dates.values).astype("timedelta64[D]").astype(int)
+    step = int(max(1, round(float(np.median(steps))))) if len(steps) else 7
+    # Горизонт не дальше ~3 месяцев: прогноз на полгода вперёд (в зиму)
+    # агроному бесполезен и выглядит как «линия ради линии».
+    horizon = max(1, min(int(horizon), 30, max(1, 90 // step)))
+    obs = np.array([float(p[1]) for p in pts[-12:]])
+    x = np.arange(len(obs))
+    slope = float(np.polyfit(x, obs, 1)[0]) if len(obs) >= 2 else 0.0
+    slope = float(np.clip(slope, -0.05, 0.05))  # не верим в обрывы
+    clim = np.array([float(p[2]) for p in pts[-12:] if p[2] is not None and pd.notna(p[2])])
+    if len(clim) >= 2:
+        clim_slope = float(np.polyfit(np.arange(len(clim)), clim, 1)[0])
+    else:
+        clim_slope = 0.0
+    drift = 0.5 * slope + 0.5 * float(np.clip(clim_slope, -0.05, 0.05))
+    resid = obs - np.polyval(np.polyfit(x, obs, 1), x) if len(obs) >= 3 else obs - obs.mean()
+    sigma = max(float(np.std(resid)), 0.015)
+    last = obs[-1]
+    last_date = dates[-1]
+    out = []
+    for h in range(1, horizon + 1):
+        v = float(np.clip(last + drift * h, 0.0, 1.0))
+        w = min(0.25, sigma * (h ** 0.5) + 0.02)
+        out.append({"date": str((last_date + pd.Timedelta(days=h * step)).date()),
+                    "ndvi": round(v, 4),
+                    "lo": round(max(0.0, v - w), 4),
+                    "hi": round(min(1.0, v + w), 4)})
+    return out

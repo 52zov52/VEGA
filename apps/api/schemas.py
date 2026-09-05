@@ -11,6 +11,11 @@ class RegionSearchRequest(BaseModel):
     query: str = ""
 
 
+class RegionCreate(BaseModel):
+    name: str
+    center: list[float]
+
+
 class PolygonCreate(BaseModel):
     region_id: str | None = None
     name: str | None = None

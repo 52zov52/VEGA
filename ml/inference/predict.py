@@ -16,7 +16,7 @@ import pandas as pd
 from ml.data.contract import TARGET_COL
 from ml.features.build import build_features
 from ml.models.baselines import baseline_seasonal
-from ml.models.ensemble import EnsembleWeights, ensemble_predict
+from ml.models.ensemble import EnsembleWeights, apply_stratified, ensemble_predict
 
 
 def load_artifacts(model_dir: str | Path) -> dict | None:
@@ -33,8 +33,11 @@ def load_artifacts(model_dir: str | Path) -> dict | None:
         meta = json.loads(meta_p.read_text(encoding="utf-8"))
         bundle["weights"] = EnsembleWeights(**meta.get("weights", {}))
         bundle["feature_cols"] = meta.get("feature_cols", [])
+        raw_bins = meta.get("weights_by_bin") or {}
+        bundle["weights_by_bin"] = {k: EnsembleWeights(**v) for k, v in raw_bins.items()}
     else:
         bundle["weights"] = EnsembleWeights()
+        bundle["weights_by_bin"] = {}
         bundle["feature_cols"] = []
     return bundle
 
@@ -65,7 +68,11 @@ def predict_gaps(df: pd.DataFrame, artifacts: dict, clim=None) -> pd.Series:
     p_gbm = np.asarray(artifacts["gbm"].predict(X), dtype=float)
     p_tmp = np.asarray(artifacts["temporal"].predict(feat), dtype=float)
     p_sea = baseline_seasonal(work).to_numpy(dtype=float)
-    ens = ensemble_predict(p_gbm, p_tmp, p_sea, artifacts.get("weights"))
+    # Стратификация по давности наблюдения (past-only признак, без утечек):
+    # порядок feat совпадает с порядком ens, как и раньше для work.index.
+    dso = feat["days_since_obs"].to_numpy() if "days_since_obs" in feat else None
+    ens = apply_stratified(p_gbm, p_tmp, p_sea, dso,
+                           artifacts.get("weights_by_bin"), artifacts.get("weights"))
     out = work[TARGET_COL].astype(float)
     out.loc[mask] = pd.Series(ens, index=work.index).loc[mask]
     return out.loc[order].clip(0, 1)

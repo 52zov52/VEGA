@@ -52,7 +52,7 @@ cd apps/web && npm run dev
 py scripts/train.py --train data/train_dataset.csv --extra data/test.csv --out models
 # --extra добавляет известные строки теста в финальный фит (валидация остаётся на train);
 # без файлов — обучение на demo-датасете; результат: models/*.joblib + meta.json
-# факт contest: valid 1d RMSE 0.0668, GapScore 9.95; таблица: experiments/ensemble.csv
+# факт contest: valid 1d RMSE 0.0636, GapScore 10.91 (pooled 3 сида + стратификация dso); таблица: experiments/ensemble.csv
 ```
 
 ## 8. Generate submission

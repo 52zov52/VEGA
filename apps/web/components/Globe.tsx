@@ -23,6 +23,8 @@ type Props = {
   drawMode?: boolean;
   onDrawPoint?: (lng: number, lat: number) => void;
   layers?: Layers;
+  diveId?: string | null;
+  diveKey?: number;
 };
 
 const CROP_RU: Record<string, string> = {
@@ -188,7 +190,7 @@ function AnchoredPopup({ globeRef, field, onAnalyze }: {
   );
 }
 
-export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger, drawMode, onDrawPoint, layers }: Props) {
+export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger, drawMode, onDrawPoint, layers, diveId, diveKey }: Props) {
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
@@ -206,18 +208,20 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   }, []);
 
   // Слой «Контуры полей» скрывает полигоны целиком.
-  // ВАЖНО: three-globe читает geoJson.type напрямую, поэтому кладём объект,
-  // а не JSON-строку (строку он молча отбрасывает как unsupported).
-  // Плюс строгая валидация колец: битая геометрия отбрасывается до рендера.
+  // ВАЖНО: three-globe/d3-geo читают geoJson.type напрямую, поэтому кладём
+  // объект, а не JSON-строку. И ВАЖНО-2: внешнее кольцо обязано идти ПО
+  // часовой стрелке — иначе d3-geo считает площадью 4π (весь шар), отдаёт
+  // мировые bounds, и триангуляция строит сетку на всю сферу (зелёный шар).
+  // Поэтому нормализуем вайдинг: signed area > 0 => разворачиваем.
   const polygonData = useMemo(() => {
     const list = layers?.agriculture === false ? [] : fields;
     const out: any[] = [];
     for (const f of list) {
-      const ring = f.geometry?.coordinates?.[0];
-      if (!Array.isArray(ring) || ring.length < 4) continue;
+      const rawRing = f.geometry?.coordinates?.[0];
+      if (!Array.isArray(rawRing) || rawRing.length < 4) continue;
       let ok = true;
       let minLng = 180, maxLng = -180, minLat = 90, maxLat = -90;
-      for (const pt of ring) {
+      for (const pt of rawRing) {
         const lng = pt?.[0], lat = pt?.[1];
         if (typeof lng !== "number" || typeof lat !== "number" || !isFinite(lng) || !isFinite(lat)) { ok = false; break; }
         if (lng < minLng) minLng = lng;
@@ -231,6 +235,12 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         console.warn(`[vega] skip bad polygon ${f.id}: bbox ${w}x${h}`);
         continue;
       }
+      let ring = rawRing;
+      let s = 0;
+      for (let i = 0; i < ring.length - 1; i++) {
+        s += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+      }
+      if (s > 0) ring = [...ring].reverse();
       out.push({
         id: f.id,
         level: f.level || "normal",
@@ -269,6 +279,22 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     const field = fields.find((f) => f.id === selectedId);
     if (field) setPopup({ field });
   }, [selectedId, flyToTrigger, fields]);
+
+  // DIVE: кинематографичное пикирование камеры в точку поля перед
+  // переходом на страницу анализа — поверх затем наезжает чёрный оверлей,
+  // и смена страницы выглядит незаметной.
+  useEffect(() => {
+    if (!diveKey || !diveId || !globeRef.current) return;
+    const field = fields.find((f) => f.id === diveId);
+    if (!field?.center) return;
+    try {
+      globeRef.current.pointOfView(
+        { lat: field.center[0], lng: field.center[1], altitude: 0.00005 },
+        1500
+      );
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diveKey]);
 
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;

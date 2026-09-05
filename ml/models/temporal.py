@@ -67,7 +67,7 @@ class TemporalModel:
             pass
         from sklearn.neural_network import MLPRegressor
 
-        self.model = MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=400, random_state=self.seed)
+        self.model = MLPRegressor(hidden_layer_sizes=(128, 64), max_iter=800, random_state=self.seed)
         self.model.fit(X, y)
         self.used_backend = "sklearn-mlp"
         return self

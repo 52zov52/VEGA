@@ -45,11 +45,16 @@ def explain_event(event: dict, ts: pd.DataFrame, weather_available: bool = True)
         nb = float(ts[ts["polygon_id"] == event["polygon_id"]]["ndwi"].mean())
         add("ndwi", (n - nb) * 100, "подтверждение" if n < nb else "слабый", "down" if n < nb else "up")
 
+    # факторы — по убыванию силы, чтобы главный был первым
+    factors.sort(key=lambda f: abs(f["delta_pct"]), reverse=True)
+
     # классификация сценария §18
     rain_neg = any(f["signal"] == "precipitation" and f["delta_pct"] < -20 for f in factors)
     soil_neg = any(f["signal"] == "soil_moisture" and f["delta_pct"] < -15 for f in factors)
-    ndwi_neg = any(f["signal"] == "ndwi" and f["direction"] == "down" for f in factors)
+    # слабый шум NDWI (в пределах ±3) причиной не считаем — только выраженное падение
+    ndwi_neg = any(f["signal"] == "ndwi" and f["direction"] == "down" and f["delta_pct"] < -3 for f in factors)
     dq = float(event.get("data_quality", 1.0))
+    kind = str(event.get("kind", "sustained"))
     if dq < 0.5 and abs(dev) > 15:
         cause = "Возможная сенсорная/облачная артефактная аномалия — проверьте качество данных"
         conf = 0.55
@@ -68,14 +73,33 @@ def explain_event(event: dict, ts: pd.DataFrame, weather_available: bool = True)
     else:
         cause = "Умеренное отклонение в пределах естественной изменчивости"
         conf = 0.5
+    # калибровка уверенности характером эпизода (детерминированная, §17):
+    # всплеск и облачный эпизод менее надёжны, устойчивый — наоборот
+    if kind == "spike":
+        conf *= 0.9
+    elif kind == "uncertain":
+        conf *= 0.8
+    elif kind == "sustained":
+        conf = min(0.9, conf + 0.03)
     if not weather_available:
         conf = round(conf * 0.9, 2)
 
     period = f"{event['start_date']} — {event['end_date']}"
+    n_steps = int(event.get("duration_steps", len(seg)))
+    dur_txt = f"длительность {n_steps} точек" + (" (однократный всплеск)" if kind == "spike" else "")
+    rec_txt = ""
+    if event.get("recovered"):
+        rec_txt = f" К норме поле вернулось {event.get('recovery_date')} — восстановление зафиксировано."
+    elif kind == "sustained":
+        rec_txt = " Восстановления пока нет — эпизод открытый."
+    qual_txt = ""
+    if dq < 0.5:
+        qual_txt = f" Осторожно: среднее качество данных в эпизоде низкое ({dq:.2f}) — возможна облачность."
     narrative = (
-        f"NDVI {dev:.0f}% относительно сезонной нормы за период {period}. "
+        f"NDVI {dev:.0f}% относительно сезонной нормы за период {period}, {dur_txt}. "
         f"Наиболее вероятный фактор: {cause.lower()}. "
         + (" ".join(f"{f['signal']} {f['delta_pct']:+.0f}% ({f['strength']});" for f in factors) if factors else "Погодное подтверждение недоступно.")
+        + rec_txt + qual_txt
         + " Это аналитическая оценка, а не агрономический диагноз."
     )
     return {
@@ -87,4 +111,11 @@ def explain_event(event: dict, ts: pd.DataFrame, weather_available: bool = True)
         "factors": factors,
         "narrative": narrative,
         "weather_unavailable": not weather_available,
+        "kind": kind,
+        "duration_steps": n_steps,
+        "recovered": bool(event.get("recovered")),
+        "recovery_date": event.get("recovery_date"),
+        "level": event.get("level", "normal"),
+        "start_date": event.get("start_date"),
+        "end_date": event.get("end_date"),
     }

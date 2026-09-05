@@ -67,3 +67,47 @@ def grid_search_weights(
                 best_score = score
                 best = EnsembleWeights(a, b, max(c, 0))
     return best.normalized()
+
+
+# Стратификация весов по давности последнего наблюдения (days_since_obs):
+# свежим точкам важнее GBM/interp, далёким — seasonal. Границы из ablation.
+DSO_BINS: tuple[tuple[str, int, int | None], ...] = (
+    ("dso1-2", 0, 2),
+    ("dso3-7", 3, 7),
+    ("dso8+", 8, None),
+)
+
+
+def dso_bin_names(dso: np.ndarray) -> np.ndarray:
+    dso = np.asarray(dso, dtype=float)
+    out = np.full(dso.shape, "dso8+", dtype=object)
+    out[dso <= 2] = "dso1-2"
+    out[(dso >= 3) & (dso <= 7)] = "dso3-7"
+    return out
+
+
+def apply_stratified(
+    p_gbm: np.ndarray,
+    p_temporal: np.ndarray,
+    p_seasonal: np.ndarray,
+    dso: np.ndarray | None,
+    weights_by_bin: dict[str, EnsembleWeights] | None,
+    fallback: EnsembleWeights | None = None,
+) -> np.ndarray:
+    """Взвешивание по бинам dso; без dso/весов — обычный глобальный ансамбль."""
+    if not weights_by_bin or dso is None:
+        return ensemble_predict(p_gbm, p_temporal, p_seasonal, fallback)
+    names = dso_bin_names(dso)
+    out = np.zeros_like(np.asarray(p_gbm, dtype=float))
+    for name, _, _ in DSO_BINS:
+        m = names == name
+        if not m.any():
+            continue
+        w = weights_by_bin.get(name) or fallback
+        out[m] = ensemble_predict(
+            np.asarray(p_gbm, dtype=float)[m],
+            np.asarray(p_temporal, dtype=float)[m],
+            np.asarray(p_seasonal, dtype=float)[m],
+            w,
+        )
+    return out

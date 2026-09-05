@@ -34,7 +34,7 @@ from ml.evaluation.metrics import gap_score, rmse  # noqa: E402
 from ml.evaluation.splits import time_forward_splits  # noqa: E402
 from ml.features.build import FEATURES_VERSION, build_features  # noqa: E402
 from ml.models.baselines import baseline_linear, baseline_nearest, baseline_seasonal  # noqa: E402
-from ml.models.ensemble import EnsembleWeights, ensemble_predict, grid_search_weights  # noqa: E402
+from ml.models.ensemble import EnsembleWeights, apply_stratified, dso_bin_names, DSO_BINS, ensemble_predict, grid_search_weights  # noqa: E402
 from ml.models.gbm import GBMModel  # noqa: E402 (бэкенд внутри ResidualGBM)
 from ml.models.residual import ResidualGBM  # noqa: E402
 from ml.models.temporal import TemporalModel  # noqa: E402
@@ -116,11 +116,15 @@ def fit_rows_from_masked(
 def make_fit_set(
     known_df: pd.DataFrame, clim_fit: PastClimatology, seed: int
 ) -> tuple[pd.DataFrame, pd.Series, list[str]]:
-    """ train-known -> маски 1d/3d -> фичи -> (X_fit, y_fit) по скрытым точкам."""
+    """ train-known -> маски 1d-heavy -> фичи -> (X_fit, y_fit).
+
+    Смесь смещена к одиночным пропускам (структура скрытого теста: 85% 1d).
+    """
     parts_X: list[pd.DataFrame] = []
     parts_y: list[pd.Series] = []
     cols: list[str] = []
-    for gap_len, n_gaps, s in ((1, 100, seed), (3, 40, seed + 1)):
+    for gap_len, n_gaps, s in ((1, 400, seed), (1, 200, seed + 21),
+                               (2, 120, seed + 1), (3, 80, seed + 2)):
         masked = mask_random_gaps(known_df, gap_len=gap_len, n_gaps=n_gaps, seed=s)
         if not masked["is_synthetic_gap"].any():
             continue
@@ -131,6 +135,59 @@ def make_fit_set(
     X_fit = pd.concat(parts_X, ignore_index=True) if parts_X else pd.DataFrame()
     y_fit = pd.concat(parts_y, ignore_index=True) if parts_y else pd.Series(dtype=float)
     return X_fit, y_fit, cols
+
+
+def select_weights(
+    valid_df: pd.DataFrame,
+    base: dict,
+    clim_train: PastClimatology,
+    seeds: tuple[int, ...] = (42, 43, 44),
+) -> tuple[EnsembleWeights, dict[str, EnsembleWeights], dict]:
+    """Подбор весов на pooled validation-масках нескольких сидов.
+
+    Возвращает (глобальные веса, веса по бинам dso, отчёт с RMSE).
+    Мультисид гасит шум одномасковой селекции; стратификация даёт
+    свежим точкам больше GBM, далёким — больше seasonal.
+    """
+    from ml.inference.predict import predict_gaps as _pg
+
+    Y, G, T, S, D = [], [], [], [], []
+    for s in seeds:
+        masked = mask_random_gaps(valid_df, gap_len=1, n_gaps=30, seed=s)
+        if not masked["is_synthetic_gap"].any():
+            continue
+        sel = masked["is_synthetic_gap"].to_numpy()
+        Y.append(_truth_at(valid_df, masked))
+        G.append(_pg(masked, {**base, "weights": EnsembleWeights(1, 0, 0)},
+                     clim=clim_train).to_numpy(float)[sel])
+        T.append(_pg(masked, {**base, "weights": EnsembleWeights(0, 1, 0)},
+                     clim=clim_train).to_numpy(float)[sel])
+        sea: list[float] = []
+        for _, sub in masked.groupby("polygon_id"):
+            sea += baseline_seasonal(sub)[sub["is_synthetic_gap"].to_numpy()].tolist()
+        S.append(np.asarray(sea, dtype=float))
+        feat, _ = build_features(masked, clim=clim_train)
+        D.append(feat["days_since_obs"].to_numpy()[sel]
+                 if "days_since_obs" in feat else np.ones(sel.sum()))
+    y_w = np.concatenate(Y)
+    p_gbm_w = np.concatenate(G)
+    p_tmp_w = np.concatenate(T)
+    p_sea_w = np.concatenate(S)
+    dso_w = np.concatenate(D)
+    weights = grid_search_weights(y_w, p_gbm_w, p_tmp_w, p_sea_w)
+    by_bin: dict[str, EnsembleWeights] = {}
+    names = dso_bin_names(dso_w)
+    for name, _, _ in DSO_BINS:
+        m = names == name
+        by_bin[name] = grid_search_weights(y_w[m], p_gbm_w[m], p_tmp_w[m], p_sea_w[m]) \
+            if m.sum() >= 20 else weights
+    report = {
+        "n": int(len(y_w)),
+        "gbm": rmse(y_w, p_gbm_w), "tmp": rmse(y_w, p_tmp_w), "sea": rmse(y_w, p_sea_w),
+        "ens_global": rmse(y_w, ensemble_predict(p_gbm_w, p_tmp_w, p_sea_w, weights)),
+        "ens_strat": rmse(y_w, apply_stratified(p_gbm_w, p_tmp_w, p_sea_w, dso_w, by_bin, weights)),
+    }
+    return weights, by_bin, report
 
 
 def main() -> None:
@@ -169,27 +226,19 @@ def main() -> None:
     temporal = TemporalModel(seed=SEED).fit(X_fit, y_fit)
     print(f"backends: gbm={gbm.used_backend} temporal={temporal.used_backend}", flush=True)
 
-    # Подбор весов на validation gaps 1 день (структура скрытого теста: 85% одиночных).
-    from ml.inference.predict import predict_gaps as _pg
-
-    masked_w = mask_random_gaps(valid_df, gap_len=1, n_gaps=30, seed=SEED)
-    y_w = _truth_at(valid_df, masked_w)
+    # Подбор весов на pooled validation-масках (структура скрытого теста: 85% одиночных).
     base = {"gbm": gbm, "temporal": temporal, "feature_cols": cols}
-    p_gbm_w = _pg(masked_w, {**base, "weights": EnsembleWeights(1, 0, 0)}, clim=clim_train).loc[
-        masked_w["is_synthetic_gap"].to_numpy()].to_numpy(float)
-    p_tmp_w = _pg(masked_w, {**base, "weights": EnsembleWeights(0, 1, 0)}, clim=clim_train).loc[
-        masked_w["is_synthetic_gap"].to_numpy()].to_numpy(float)
-    sea_w: list[float] = []
-    for _, sub in masked_w.groupby("polygon_id"):
-        sea_w += baseline_seasonal(sub)[sub["is_synthetic_gap"].to_numpy()].tolist()
-    p_sea_w = np.asarray(sea_w, dtype=float)
-    weights = grid_search_weights(y_w, p_gbm_w, p_tmp_w, p_sea_w)
+    weights, weights_by_bin, wrep = select_weights(valid_df, base, clim_train)
     print(f"weights: gbm={weights.w_gbm:.2f} temporal={weights.w_temporal:.2f} seasonal={weights.w_seasonal:.2f}")
-    print(f"valid 1d RMSE: gbm={rmse(y_w, p_gbm_w):.4f} tmp={rmse(y_w, p_tmp_w):.4f} "
-          f"sea={rmse(y_w, p_sea_w):.4f} ens={rmse(y_w, ensemble_predict(p_gbm_w, p_tmp_w, p_sea_w, weights)):.4f} "
-          f"gap_score={gap_score(rmse(y_w, ensemble_predict(p_gbm_w, p_tmp_w, p_sea_w, weights)))}")
+    for name, _, _ in DSO_BINS:
+        w = weights_by_bin[name]
+        print(f"  {name}: gbm={w.w_gbm:.2f} temporal={w.w_temporal:.2f} seasonal={w.w_seasonal:.2f}")
+    print(f"valid 1d RMSE (pooled {wrep['n']} pts): gbm={wrep['gbm']:.4f} tmp={wrep['tmp']:.4f} "
+          f"sea={wrep['sea']:.4f} ens_global={wrep['ens_global']:.4f} ens_strat={wrep['ens_strat']:.4f} "
+          f"gap_score={gap_score(wrep['ens_strat'])}")
 
-    models = {"gbm": gbm, "temporal": temporal, "weights": weights, "feature_cols": cols}
+    models = {"gbm": gbm, "temporal": temporal, "weights": weights,
+              "weights_by_bin": weights_by_bin, "feature_cols": cols}
     table: dict[str, dict[str, float]] = {}
     for gap_len in GAP_GRID:
         r = eval_on_masked(valid_df, gap_len, SEED, models, clim_train)
@@ -213,11 +262,12 @@ def main() -> None:
 
     joblib.dump(gbm_f, out_dir / "gbm.joblib")
     joblib.dump(temporal_f, out_dir / "temporal.joblib")
-    final_rmse = rmse(y_w, ensemble_predict(p_gbm_w, p_tmp_w, p_sea_w, weights))
+    final_rmse = wrep["ens_strat"]
     (out_dir / "meta.json").write_text(json.dumps({
         "seed": SEED, "dataset_version": DATASET_VERSION, "features": FEATURES_VERSION,
         "model": f"ensemble({gbm_f.used_backend}+{temporal_f.used_backend}+seasonal)",
         "split": "time_forward", "weights": vars(weights.normalized()),
+        "weights_by_bin": {k: vars(v.normalized()) for k, v in weights_by_bin.items()},
         "feature_cols": cols_f,
         "score_valid_1d": final_rmse, "gap_score_valid_1d": gap_score(final_rmse),
         "train_time_s": round(time.time() - t0, 1),
