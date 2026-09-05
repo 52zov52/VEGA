@@ -205,16 +205,18 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     return () => { cancelled = true; };
   }, []);
 
-  // Слой «Контуры полей» скрывает полигоны целиком
+  // Слой «Контуры полей» скрывает полигоны целиком.
+  // ВАЖНО: three-globe читает geoJson.type напрямую, поэтому кладём объект,
+  // а не JSON-строку (строку он молча отбрасывает как unsupported).
   const polygonData = (layers?.agriculture === false ? [] : fields)
     .filter((f) => f.geometry?.coordinates)
     .map((f) => ({
       id: f.id,
       level: f.level || "normal",
-      geoJsonGeometry: JSON.stringify({
+      geoJsonGeometry: {
         type: "Polygon",
         coordinates: [f.geometry.coordinates[0]],
-      }),
+      },
     }));
 
   // Слой «Заливка» включает/выключает заливку полигонов (контуры остаются)

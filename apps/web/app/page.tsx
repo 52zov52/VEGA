@@ -28,6 +28,13 @@ const LAYER_RU: Record<string, string> = {
   anomaly: "Метки полей",
 };
 
+const LEVEL_RU: Record<string, string> = {
+  normal: "Норма",
+  watch: "Наблюдение",
+  stress: "Стресс",
+  critical: "Критично",
+};
+
 // Свой полигон -> то же поле для карты: центр и площадь считаем по bbox геометрии
 function fieldFromSaved(p: SavedPoly): Field {
   const ring: [number, number][] = p.geometry?.coordinates?.[0] || [];
@@ -74,6 +81,7 @@ export default function Page() {
   const [comparing, setComparing] = useState(false);
   const [globeFlyTo, setGlobeFlyTo] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [selectedField, setSelectedField] = useState<Field | null>(null);
 
   async function loadRegions(q = "") {
@@ -273,6 +281,7 @@ export default function Page() {
       const rows = [];
       for (const pid of compareIds.slice(0, 5)) rows.push({ id: pid, ...(await fetchAnalysis(pid)) });
       setCompareData(rows);
+      setCompareOpen(true);
     } catch (e: any) {
       setError(`Сравнение не удалось: ${e.message}`);
     } finally {
@@ -459,6 +468,46 @@ export default function Page() {
               <div key={i} className="info-note">ℹ {w}</div>
             ))}
           </>
+        )}
+      </Modal>
+
+      {/* Модальное окно сравнения полей */}
+      <Modal open={compareOpen} onClose={() => setCompareOpen(false)} title={`Сравнение полей (${compareData.length})`}>
+        {comparing && <PipelineState />}
+        {!comparing && !compareData.length && (
+          <EmptyState text="Нет данных для сравнения." icon="◇" />
+        )}
+        {!comparing && !!compareData.length && (
+          <div className="compare-table-wrap">
+            <table className="compare-table">
+              <thead>
+                <tr>
+                  <th>Поле</th>
+                  <th>Культура</th>
+                  <th>NDVI</th>
+                  <th>Откл., %</th>
+                  <th>Риск</th>
+                  <th>Качество</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compareData.map((row: any) => {
+                  const f = globeFields.find((x) => x.id === row.id);
+                  const level = row.kpi?.level || "normal";
+                  return (
+                    <tr key={row.id} className={row.id === fieldId ? "current" : ""}>
+                      <td className="mono">{row.id}</td>
+                      <td>{f ? getCropRu(f.crop) : "—"}</td>
+                      <td className="mono">{row.kpi?.current_ndvi ?? "—"}</td>
+                      <td className="mono">{row.kpi?.season_deviation_pct ?? "—"}</td>
+                      <td><span className={`badge ${level}`}>{LEVEL_RU[level] || level}</span></td>
+                      <td className="mono">{row.kpi?.data_quality ?? "—"}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </Modal>
     </div>

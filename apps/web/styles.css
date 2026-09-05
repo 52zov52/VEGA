@@ -683,6 +683,43 @@ button, .btn-primary, .btn-secondary, .btn-ghost {
   filter: drop-shadow(0 0 8px rgba(76,175,80,0.7));
 }
 
+/* ─── Compare table ─── */
+.compare-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.compare-table th {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-elevated);
+  white-space: nowrap;
+}
+.compare-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.compare-table tbody tr:last-child td { border-bottom: none; }
+.compare-table tbody tr.current td { background: var(--accent-vegetation-dim); color: var(--text); }
+.compare-table td.mono {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
 /* ─── Globe Popup (HTML overlay, NOT inside WebGL) ─── */
 .globe-popup-anchor {
   position: absolute;
