@@ -220,7 +220,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     if (!globeRef.current || !selectedId) return;
     const field = fields.find((f) => f.id === selectedId);
     if (!field) return;
-    globeRef.current.pointOfView({ lat: field.center[0], lng: field.center[1], altitude: 0.004 }, 1600);
+    globeRef.current.pointOfView({ lat: field.center[0], lng: field.center[1], altitude: 0.0012 }, 1600);
   }, [selectedId, flyToTrigger, fields]);
 
   // Попап при любом выделении поля (сайдбар, полигон, пин).
