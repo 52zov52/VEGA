@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as echarts from "echarts";
 import dynamic from "next/dynamic";
 import { MapPin, Layers, Pencil, Trash2, BarChart3, Play } from "lucide-react";
@@ -21,6 +21,37 @@ const REGION_COORDS: Record<string, [number, number]> = {
   krasnodar: [45.0, 38.9],
   voronezh: [51.6, 39.2],
 };
+
+const LAYER_RU: Record<string, string> = {
+  agriculture: "Контуры полей",
+  ndvi: "Заливка NDVI",
+  anomaly: "Метки полей",
+};
+
+// Свой полигон -> то же поле для карты: центр и площадь считаем по bbox геометрии
+function fieldFromSaved(p: SavedPoly): Field {
+  const ring: [number, number][] = p.geometry?.coordinates?.[0] || [];
+  if (!ring.length) {
+    return { id: p.id, region_id: "", crop: "unknown", area_ha: 0, center: [47.2, 39.7], geometry: p.geometry };
+  }
+  let minLng = 180, maxLng = -180, minLat = 90, maxLat = -90;
+  for (const [lng, lat] of ring) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  const avgLat = ((minLat + maxLat) / 2) * Math.PI / 180;
+  const areaHa = Math.max(0, maxLat - minLat) * 111.32 * Math.max(0, maxLng - minLng) * 111.32 * Math.cos(avgLat) * 100;
+  return {
+    id: p.id,
+    region_id: "",
+    crop: "unknown",
+    area_ha: Math.round(areaHa * 10) / 10,
+    center: [(minLat + maxLat) / 2, (minLng + maxLng) / 2],
+    geometry: p.geometry,
+  };
+}
 
 export default function Page() {
   const chartRef = useRef<HTMLDivElement>(null);
@@ -75,23 +106,20 @@ export default function Page() {
       .catch(() => setFieldsState("error"));
   }, [regionId]);
 
+  const savedFields = useMemo<Field[]>(() => saved.map(fieldFromSaved), [saved]);
+  const globeFields = useMemo(() => [...fields, ...savedFields], [fields, savedFields]);
+
   const handleFieldSelect = useCallback((id: string) => {
     setFieldId(id);
-    const field = fields.find((f) => f.id === id);
+    const field = globeFields.find((f) => f.id === id);
     setSelectedField(field || null);
     setGlobeFlyTo((n) => n + 1);
-  }, [fields]);
+  }, [globeFields]);
 
-  // Клики карты -> вершины рисуемого полигона
-  useEffect(() => {
-    if (!drawMode) return;
-    const onClick = (e: Event) => {
-      const [lng, lat] = (e as CustomEvent).detail as [number, number];
-      setVertices((v) => [...v, [lng, lat]]);
-    };
-    window.addEventListener("vega-map-click", onClick);
-    return () => window.removeEventListener("vega-map-click", onClick);
-  }, [drawMode]);
+  // Клик по глобусу в режиме рисования -> новая вершина полигона
+  const handleDrawPoint = useCallback((lng: number, lat: number) => {
+    setVertices((v) => [...v, [lng, lat]]);
+  }, []);
 
   async function finishDrawing() {
     if (vertices.length < 3) { setError("Нужно минимум 3 точки."); return; }
@@ -103,8 +131,10 @@ export default function Page() {
       });
       const poly = await r.json();
       setSaved((s) => [...s, poly]);
-      setFieldId(poly.id);
-      setSelectedField(poly);
+      const field = fieldFromSaved(poly);
+      setFieldId(field.id);
+      setSelectedField(field);
+      setGlobeFlyTo((n) => n + 1);
       setVertices([]); setDrawMode(false);
     } catch { setError("Не удалось сохранить полигон."); }
   }
@@ -119,7 +149,7 @@ export default function Page() {
   // Анализ из попапа на глобусе
   async function handleAnalyzeField(pid: string) {
     setFieldId(pid);
-    const field = fields.find((f) => f.id === pid);
+    const field = globeFields.find((f) => f.id === pid);
     setSelectedField(field || null);
     setGlobeFlyTo((n) => n + 1);
     setLoading(true); setError(null);
@@ -371,21 +401,24 @@ export default function Page() {
             {(Object.keys(layers) as (keyof typeof layers)[]).map((k) => (
               <label key={k} className="layer-toggle">
                 <input type="checkbox" checked={layers[k]} onChange={() => setLayers({ ...layers, [k]: !layers[k] })} />
-                <span>{k}</span>
+                <span>{LAYER_RU[k] || k}</span>
               </label>
             ))}
           </div>
         </aside>
 
         {/* Globe */}
-        <main className="globe-wrap">
+        <main className={drawMode ? "globe-wrap drawing" : "globe-wrap"}>
           <Globe
-            fields={fields}
+            fields={globeFields}
             selectedId={fieldId}
             onSelect={handleFieldSelect}
             onAnalyze={handleAnalyzeField}
             regionCenter={REGION_COORDS[regionId] || [47.2, 39.7]}
             flyToTrigger={globeFlyTo}
+            drawMode={drawMode}
+            onDrawPoint={handleDrawPoint}
+            layers={layers}
           />
           {drawMode && (
             <div className="draw-overlay">

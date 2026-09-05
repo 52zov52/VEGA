@@ -113,6 +113,9 @@ a { color: var(--accent-vegetation); text-decoration: none; }
   background: #000000;
   overflow: hidden;
 }
+.globe-wrap.drawing, .globe-wrap.drawing canvas {
+  cursor: crosshair !important;
+}
 @keyframes twinkle {
   0% { opacity: 0.6; }
   50% { opacity: 1; }

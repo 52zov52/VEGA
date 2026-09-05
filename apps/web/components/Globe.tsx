@@ -11,6 +11,8 @@ type Field = {
   level?: string;
 };
 
+type Layers = { agriculture: boolean; ndvi: boolean; anomaly: boolean };
+
 type Props = {
   fields: Field[];
   selectedId: string;
@@ -18,6 +20,9 @@ type Props = {
   onAnalyze: (id: string) => void;
   regionCenter?: [number, number];
   flyToTrigger?: number;
+  drawMode?: boolean;
+  onDrawPoint?: (lng: number, lat: number) => void;
+  layers?: Layers;
 };
 
 const CROP_RU: Record<string, string> = {
@@ -33,6 +38,9 @@ const CROP_RU: Record<string, string> = {
   "кукуруза": "Кукуруза",
   "soybean": "Соя",
   "соя": "Соя",
+  "barley": "Ячмень",
+  "ячмень": "Ячмень",
+  "unknown": "Неизвестно",
 };
 
 function getCropRu(crop: string): string {
@@ -45,11 +53,12 @@ export { getCropRu };
 // HTML-маркеры в стиле Google Maps: один rAF-цикл двигает все div'ы
 // через getScreenCoords каждый кадр — привязка жёсткая, отставания нет.
 // Клики — обычные DOM onClick. Маршрут на обратной стороне глобуса прячем.
-function MarkersOverlay({ globeRef, fields, selectedId, onSelect }: {
+function MarkersOverlay({ globeRef, fields, selectedId, onSelect, hidden }: {
   globeRef: React.RefObject<any>;
   fields: Field[];
   selectedId: string;
   onSelect: (id: string) => void;
+  hidden?: boolean;
 }) {
   const elsRef = useRef(new Map<string, HTMLDivElement>());
 
@@ -97,6 +106,8 @@ function MarkersOverlay({ globeRef, fields, selectedId, onSelect }: {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [globeRef, fields]);
+
+  if (hidden) return null;
 
   return (
     <div className="globe-markers">
@@ -177,7 +188,7 @@ function AnchoredPopup({ globeRef, field, onAnalyze }: {
   );
 }
 
-export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger }: Props) {
+export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionCenter, flyToTrigger, drawMode, onDrawPoint, layers }: Props) {
   const globeRef = useRef<any>(null);
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   const [ready, setReady] = useState(false);
@@ -194,7 +205,8 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     return () => { cancelled = true; };
   }, []);
 
-  const polygonData = fields
+  // Слой «Контуры полей» скрывает полигоны целиком
+  const polygonData = (layers?.agriculture === false ? [] : fields)
     .filter((f) => f.geometry?.coordinates)
     .map((f) => ({
       id: f.id,
@@ -205,10 +217,12 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
       }),
     }));
 
+  // Слой «Заливка» включает/выключает заливку полигонов (контуры остаются)
   const polyCapColor = useCallback((d: any) => {
+    if (layers?.ndvi === false) return "rgba(0,0,0,0)";
     const colors: Record<string, string> = { critical: "#f44336", stress: "#ff9800", watch: "#29b6f6" };
     return `${colors[d.level] || "#4caf50"}22`;
-  }, []);
+  }, [layers]);
 
   const polySideColor = useCallback((d: any) => {
     const colors: Record<string, string> = { critical: "#f44336", stress: "#ff9800", watch: "#29b6f6" };
@@ -265,8 +279,15 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonStrokeColor={(d: any) => d.id === selectedId ? "#ffffffaa" : "transparent"}
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
-        onPolygonClick={(d: any) => onSelect(d.id)}
-        onGlobeClick={() => setPopup(null)}
+        onPolygonClick={(d: any) => { if (!drawMode) onSelect(d.id); }}
+        onGlobeClick={(coords: any) => {
+          // В режиме рисования клик по глобусу = новая вершина полигона
+          if (drawMode && coords && typeof coords.lat === "number" && typeof coords.lng === "number") {
+            onDrawPoint?.(coords.lng, coords.lat);
+            return;
+          }
+          setPopup(null);
+        }}
         controlGlobe={false}
         animateIn={true}
         width={undefined}
@@ -274,15 +295,17 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         style={{ width: "100%", height: "100%" }}
       />
 
-      {/* HTML-маркеры Google Maps поверх WebGL */}
+      {/* HTML-маркеры Google Maps поверх WebGL.
+          Слой «Метки» скрывает их; в режиме рисования тоже прячем, чтобы не мешали */}
       <MarkersOverlay
         globeRef={globeRef}
         fields={fields}
         selectedId={selectedId}
         onSelect={onSelect}
+        hidden={drawMode || layers?.anomaly === false}
       />
 
-      {popup && (
+      {popup && !drawMode && (
         <AnchoredPopup
           globeRef={globeRef}
           field={popup.field}
