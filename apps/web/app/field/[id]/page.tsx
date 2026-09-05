@@ -386,7 +386,7 @@ export default function FieldPage() {
                 </div>
               </div>
               <div className="chart-container">
-                <div ref={chartRef} style={{ width: "100%", height: 340 }} />
+                <div ref={chartRef} className="chart-main" style={{ width: "100%", height: 340 }} />
               </div>
             </section>
 
@@ -406,7 +406,7 @@ export default function FieldPage() {
                   </div>
                 )}
                 <div className="chart-container">
-                  <div ref={fcRef} style={{ width: "100%", height: 220 }} />
+                  <div ref={fcRef} className="chart-forecast" style={{ width: "100%", height: 220 }} />
                 </div>
                 <div className="compare-table-wrap">
                   <table className="compare-table">

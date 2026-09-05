@@ -129,6 +129,8 @@ export default function Page() {
   // Dive-переход на страницу анализа: id поля + счётчик для триггера зума камеры
   const [diving, setDiving] = useState<string | null>(null);
   const [diveKey, setDiveKey] = useState(0);
+  // Мобильная панель: drawer с контролами поверх карты
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   async function loadRegions(q = "") {
     try {
@@ -204,7 +206,26 @@ export default function Page() {
     if (diving) return;
     setFieldId(id);
     setGlobeFlyTo((n) => n + 1);
+    // На мобилке после выбора закрываем drawer, чтобы было видно карту
+    setSidebarOpen(false);
   }, [diving]);
+
+  // Ресайз до десктопа — сбрасываем мобильный drawer
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth > 1024) setSidebarOpen(false);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // Esc закрывает мобильную панель
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSidebarOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
 
   // Клик по глобусу в режиме рисования -> новая вершина полигона
   const handleDrawPoint = useCallback((lng: number, lat: number) => {
@@ -293,16 +314,39 @@ export default function Page() {
       {/* Header */}
       <header className="header">
         <div className="header-brand">
+          <button
+            className="header-burger"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label={sidebarOpen ? "Скрыть панели" : "Показать панели"}
+            aria-expanded={sidebarOpen}
+          >
+            {sidebarOpen ? "✕" : "☰"}
+          </button>
           <span className="header-logo">◇</span>
           <span className="header-title">VEGA</span>
           <span className="header-sub">Мониторинг вегетации</span>
+        </div>
+        <div className="header-actions">
+          {fieldId && (
+            <button className="btn-secondary btn-sm header-analyze" onClick={() => handleAnalyzeField(fieldId)}>
+              Анализ →
+            </button>
+          )}
         </div>
       </header>
 
       {/* Layout: sidebar + globe (без правой панели) */}
       <div className="layout layout--no-panel">
+        {/* Затемнение под мобильным drawer */}
+        {sidebarOpen && (
+          <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+        )}
         {/* Sidebar */}
-        <aside className="sidebar">
+        <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
+          <div className="sidebar-mobile-head">
+            <span className="sidebar-mobile-title">Панели управления</span>
+            <button className="modal-close" onClick={() => setSidebarOpen(false)} aria-label="Закрыть панели">✕</button>
+          </div>
           <div className="sidebar-section">
             <label className="label" htmlFor="region-search">Регион</label>
             <input
@@ -397,7 +441,7 @@ export default function Page() {
           <div className="sidebar-section">
             <span className="label">Свой полигон</span>
             {!drawMode
-              ? <button className="btn-secondary btn-full" onClick={() => { setDrawMode(true); setVertices([]); setDrawName(""); }}>✏ Нарисовать</button>
+              ? <button className="btn-secondary btn-full" onClick={() => { setDrawMode(true); setVertices([]); setDrawName(""); setSidebarOpen(false); }}>✏ Нарисовать</button>
               : (
                 <div className="draw-info">
                   <span>Точек: {vertices.length}. Нужно ≥ 3.{vertices.length >= 3 && ` ≈${Math.round(polyAreaHa(vertices)).toLocaleString("ru-RU")} га`}</span>
@@ -480,11 +524,53 @@ export default function Page() {
             diveId={diving}
             diveKey={diveKey}
           />
+          {/* Мобильные быстрые действия поверх карты */}
+          <div className="globe-fab-stack" aria-hidden={sidebarOpen ? true : undefined}>
+            <button
+              className={`globe-fab${sidebarOpen ? " active" : ""}`}
+              onClick={() => setSidebarOpen((v) => !v)}
+              aria-label="Панели управления"
+            >
+              ☰
+            </button>
+            <button
+              className={`globe-fab${drawMode ? " active" : ""}`}
+              onClick={() => {
+                if (drawMode) { setDrawMode(false); setVertices([]); }
+                else { setDrawMode(true); setVertices([]); setDrawName(""); setSidebarOpen(false); }
+              }}
+              aria-label={drawMode ? "Отменить рисование" : "Нарисовать полигон"}
+              title={drawMode ? "Отменить рисование" : "Нарисовать полигон"}
+            >
+              {drawMode ? "✕" : "✏"}
+            </button>
+          </div>
           {drawMode && (
             <div className="draw-overlay">
-              ✏ Кликните {Math.max(0, 3 - vertices.length)}+ точек на карте
+              ✏ Тапните {Math.max(0, 3 - vertices.length)}+ точек на карте
+              {vertices.length > 0 && ` · уже ${vertices.length}`}
+              <span className="draw-overlay-actions">
+                <button className="btn-primary btn-sm" onClick={finishDrawing} disabled={vertices.length < 3}>Готово</button>
+                <button className="btn-secondary btn-sm" onClick={() => { setDrawMode(false); setVertices([]); }}>Отмена</button>
+              </span>
             </div>
           )}
+          {/* Мобильная нижняя карточка выбранного поля — попап на глобусе мелкий для пальца */}
+          {fieldId && !drawMode && !diving && (() => {
+            const f = globeFields.find((x) => x.id === fieldId);
+            if (!f) return null;
+            return (
+              <div className="mobile-selected-bar">
+                <div className="mobile-selected-info" onClick={() => handleAnalyzeField(fieldId)}>
+                  <span className="mobile-selected-id">{f.id}</span>
+                  <span className="mobile-selected-meta">{getCropRu(f.crop)} · {f.area_ha} га</span>
+                </div>
+                <button className="btn-primary mobile-selected-btn" onClick={() => handleAnalyzeField(fieldId)}>
+                  Анализ →
+                </button>
+              </div>
+            );
+          })()}
           {diving && (
             <div className="dive-overlay visible">
               <div className="dive-spinner" />

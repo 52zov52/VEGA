@@ -1,9 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./../styles.css";
 
 export const metadata: Metadata = {
   title: "VEGA // Vegetation Intelligence",
   description: "Мониторинг вегетации: спутник -> ряд -> ML -> аномалия -> объяснение",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+  themeColor: "#000000",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

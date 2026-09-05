@@ -30,17 +30,21 @@
   --sidebar-w: 300px;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 13px; -webkit-font-smoothing: antialiased; }
+html { font-size: 13px; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; }
+html, body { height: 100%; }
 body {
   background: #000000;
   color: var(--text);
   font-family: var(--font-sans);
   line-height: 1.5;
   overflow: hidden;
+  overflow-x: hidden;
   height: 100vh;
+  height: 100dvh;
 }
 a { color: var(--accent-vegetation); text-decoration: none; }
-.app { display: flex; flex-direction: column; height: 100vh; }
+img, svg, canvas, table { max-width: 100%; }
+.app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
 /* ─── Header ─── */
 .header {
@@ -675,10 +679,13 @@ button, .btn-primary, .btn-secondary, .btn-ghost {
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
-@media (max-width: 900px) {
-  .layout { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
-}
+/* Десктопные элементы мобильного UI по умолчанию скрыты */
+.header-burger { display: none; }
+.header-analyze { display: none; }
+.sidebar-backdrop { display: none; }
+.sidebar-mobile-head { display: none; }
+.globe-fab-stack { display: none; }
+.mobile-selected-bar { display: none; }
 
 /* ─── Globe HTML markers (Google Maps pins) ─── */
 .globe-markers {
@@ -876,6 +883,10 @@ button, .btn-primary, .btn-secondary, .btn-ghost {
   font-family: var(--font-mono);
 }
 
+/* Высоты графиков (переопределяются медиа-запросами через !important) */
+.chart-main { width: 100%; }
+.chart-forecast { width: 100%; }
+
 /* ─── Страница расширенного анализа поля ─── */
 .field-page {
   min-height: 100vh;
@@ -1046,4 +1057,281 @@ button, .btn-primary, .btn-secondary, .btn-ghost {
   .field-grid { grid-template-columns: 1fr; }
   .stat-strip { grid-template-columns: repeat(2, 1fr); }
   .field-header { flex-wrap: wrap; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   АДАПТИВ: планшет + мобилки. Принцип:
+   - десктоп (>1024px): сайдбар слева 300px, карта справа — как было;
+   - мобилка (<=1024px): карта на весь экран, панели — выдвижной
+     drawer слева + быстрые кнопки поверх карты + нижняя карточка
+     выбранного поля. Ничего не пропадает и не мельчает.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ─── Header: бургер и компактность ─── */
+.header-burger {
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.header-burger:hover { background: var(--surface-hover); border-color: #444; }
+.header-analyze { flex-shrink: 0; white-space: nowrap; }
+
+/* ─── Drawer-заглушка / FAB / нижняя карточка (база, скрыты на десктопе выше) ─── */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  top: var(--header-h);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  z-index: 200;
+}
+.sidebar-mobile-head {
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.sidebar-mobile-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+}
+.globe-fab-stack {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 60;
+  flex-direction: column;
+  gap: 8px;
+}
+.globe-fab {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid #333;
+  background: rgba(10, 10, 10, 0.92);
+  color: #fff;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-md);
+  padding: 0;
+}
+.globe-fab:hover { border-color: var(--accent-vegetation); }
+.globe-fab.active {
+  background: var(--accent-vegetation);
+  color: #000;
+  border-color: var(--accent-vegetation);
+}
+.mobile-selected-bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 60;
+  background: rgba(8, 8, 8, 0.94);
+  border: 1px solid #333;
+  border-radius: var(--radius-lg);
+  padding: 10px 12px;
+  align-items: center;
+  gap: 12px;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-lg);
+}
+.mobile-selected-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.mobile-selected-id {
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mobile-selected-meta { font-size: 12px; color: var(--text-muted); }
+.mobile-selected-btn {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 10px 18px;
+  font-size: 14px;
+}
+
+/* ─── Планшет (<=1024px): включаем мобильный режим ─── */
+@media (max-width: 1024px) {
+  :root { --header-h: 56px; }
+  html { font-size: 14px; }
+
+  .header { padding: 0 12px; gap: 8px; }
+  .header-brand { gap: 8px; flex: 1; min-width: 0; }
+  .header-burger { display: inline-flex; }
+  .header-title { font-size: 15px; letter-spacing: 2px; }
+  .header-sub { display: none; }
+  .header-actions { display: flex; align-items: center; }
+  .header-analyze { display: inline-flex; min-height: 40px; }
+
+  .layout {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+  .globe-wrap { flex: 1; min-height: 0; min-width: 0; }
+  .globe-fab-stack { display: flex; }
+  .mobile-selected-bar { display: flex; }
+
+  /* Сайдбар -> выдвижной drawer, ничего не теряется */
+  .sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    bottom: 0;
+    width: min(360px, 92vw);
+    z-index: 300;
+    background: #0a0a0af5;
+    backdrop-filter: blur(14px);
+    border-right: 1px solid #333;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.7);
+    transform: translateX(-105%);
+    transition: transform 0.25s ease;
+    visibility: hidden;
+    padding: 14px 14px calc(20px + env(safe-area-inset-bottom, 0px));
+    gap: 16px;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  .sidebar-backdrop { display: block; }
+  .sidebar-mobile-head { display: flex; }
+
+  /* Тач-таргеты не мельчают */
+  .input, .select { min-height: 42px; font-size: 14px; }
+  .btn-primary, .btn-secondary { min-height: 40px; font-size: 13px; }
+  .btn-sm { min-height: 36px; font-size: 12.5px; padding: 8px 12px; }
+  .btn-ghost { min-height: 36px; }
+  .field-card { padding: 12px; }
+  .field-card-id { font-size: 13px; }
+  .field-card-area { font-size: 12px; }
+  .field-compare { font-size: 12px; margin-top: 8px; }
+  .field-compare input { width: 18px; height: 18px; }
+  .layer-toggle { font-size: 13px; padding: 8px 0; }
+  .layer-toggle input { width: 18px; height: 18px; }
+  .label { font-size: 11px; }
+  .field-list { max-height: 38vh; gap: 8px; }
+  .draw-actions { flex-wrap: wrap; }
+  .draw-actions .btn-sm { flex: 1 1 auto; }
+
+  /* Оверлей рисования: кнопки всегда видны и нажимаемы */
+  .draw-overlay {
+    top: auto;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    max-width: calc(100vw - 24px);
+    width: max-content;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 13px;
+    text-align: center;
+  }
+  .draw-overlay-actions { display: inline-flex; gap: 8px; }
+
+  /* Попап глобуса — под палец */
+  .globe-popup { min-width: 190px; max-width: 72vw; padding: 12px 14px; }
+  .globe-popup-id { font-size: 14px; }
+  .globe-popup-crop { font-size: 12.5px; }
+  .globe-popup-area { font-size: 11.5px; }
+  .globe-popup-btn { min-height: 44px; font-size: 13px; }
+
+  /* Модалка -> нижний шит */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .modal {
+    max-width: 100%;
+    width: 100%;
+    max-height: 92vh;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+  }
+  .modal-body { padding: 14px; }
+  .compare-table { font-size: 12px; }
+  .compare-table th, .compare-table td { padding: 10px 8px; }
+
+  /* Страница поля */
+  .field-header {
+    padding: 10px 12px;
+    gap: 8px;
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  }
+  .field-body { padding: 12px; padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
+  .panel { padding: 12px; }
+  .chart-container { padding: 8px; }
+  .chart-main { height: 280px !important; }
+  .chart-forecast { height: 200px !important; }
+}
+
+/* ─── Телефон (<=640px): максимальная компактность без потери контролов ─── */
+@media (max-width: 640px) {
+  .header-title { font-size: 14px; }
+  .header-analyze { padding: 8px 10px; font-size: 12px; }
+
+  .sidebar { width: min(340px, 94vw); padding: 12px 12px calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .field-list { max-height: 34vh; }
+  .kpi-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kpi-card { padding: 10px; }
+  .kpi-value { font-size: 17px; }
+  .stat-strip { grid-template-columns: 1fr 1fr; }
+  .stat { padding: 8px 10px; }
+  .stat-value { font-size: 15px; }
+  .stat-value.sm { font-size: 11px; word-break: break-word; }
+
+  .globe-fab { width: 52px; height: 52px; font-size: 20px; }
+  .mobile-selected-bar { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .mobile-selected-btn { padding: 10px 14px; }
+
+  .field-id { font-size: 13px; word-break: break-all; }
+  .field-title { flex-wrap: wrap; gap: 6px; }
+  .panel-title-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .mini-toggles { gap: 16px; }
+  .mini-toggles label { min-height: 36px; font-size: 12.5px; }
+  .mini-toggles input { width: 18px; height: 18px; }
+  .detail-row { font-size: 12.5px; }
+  .anomaly-row { flex-wrap: wrap; gap: 6px; }
+  .pipeline-steps { gap: 8px; }
+  .chart-main { height: 250px !important; }
+}
+
+/* ─── Очень узкие (<=380px): всё в одну колонку, без горизонтального скролла ─── */
+@media (max-width: 380px) {
+  html { font-size: 13.5px; }
+  .stat-strip { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .mobile-selected-meta { font-size: 11px; }
+  .mobile-selected-btn { font-size: 13px; padding: 10px 12px; }
+  .draw-overlay { font-size: 12px; }
 }
