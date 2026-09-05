@@ -47,26 +47,27 @@ function createPinMesh(isSelected: boolean): THREE.Group {
   const group = new THREE.Group();
   const color = isSelected ? 0xffffff : 0x4caf50;
 
-  // Маленькая палочка
-  const stickGeo = new THREE.CylinderGeometry(0.003, 0.003, 0.03, 8);
+  // Палочка — меньше
+  const stickGeo = new THREE.CylinderGeometry(0.0018, 0.0018, 0.018, 8);
   const stickMat = new THREE.MeshBasicMaterial({ color });
   const stick = new THREE.Mesh(stickGeo, stickMat);
   stick.rotation.x = Math.PI / 2;
-  stick.position.z = 0.015;
+  stick.position.z = 0.009;
   group.add(stick);
 
-  // Маленький шарик
-  const headGeo = new THREE.SphereGeometry(0.008, 12, 12);
+  // Шарик — меньше
+  const headGeo = new THREE.SphereGeometry(0.005, 12, 12);
   const headMat = new THREE.MeshBasicMaterial({ color: isSelected ? 0x4caf50 : 0x1a1a1a });
   const head = new THREE.Mesh(headGeo, headMat);
-  head.position.z = 0.034;
+  head.position.z = 0.021;
   group.add(head);
 
-  // Невидимая сфера-мишень для клика (больше, чтобы raycaster попадал)
-  const hitGeo = new THREE.SphereGeometry(0.025, 8, 8);
-  const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+  // Невидимая, но кликабельная сфера-мишень.
+  // ВАЖНО: material.visible должен быть true, иначе raycaster её пропустит.
+  const hitGeo = new THREE.SphereGeometry(0.02, 8, 8);
+  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   const hit = new THREE.Mesh(hitGeo, hitMat);
-  hit.position.z = 0.02;
+  hit.position.z = 0.012;
   hit.name = "hitArea";
   group.add(hit);
 
@@ -125,7 +126,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
 
   const scaleFromAlt = useCallback((alt: number) => {
     const t = Math.min(alt / 2, 1);
-    return 1 + t * 9;
+    return 0.8 + t * 2.2;
   }, []);
 
   const updateScales = useCallback((alt: number) => {
@@ -142,6 +143,21 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
     globeRef.current.pointOfView({ lat: field.center[0], lng: field.center[1], altitude: 0.004 }, 1600);
     updateScales(0.004);
   }, [selectedId, flyToTrigger, fields, updateScales]);
+
+  // Попап при любом выделении поля (сайдбар, полигон, пин):
+  // ставим после долёта камеры, чтобы getScreenCoords дал точку назначения
+  useEffect(() => {
+    if (!selectedId) { setPopup(null); return; }
+    const t = setTimeout(() => {
+      const field = fields.find((f) => f.id === selectedId);
+      if (!field || !globeRef.current?.getScreenCoords) return;
+      try {
+        const coords = globeRef.current.getScreenCoords(field.center[0], field.center[1]);
+        if (coords) setPopup({ field, x: coords.x, y: coords.y });
+      } catch { /* ignore */ }
+    }, 1700);
+    return () => clearTimeout(t);
+  }, [selectedId, flyToTrigger, fields]);
 
   useEffect(() => {
     if (!globeRef.current || !regionCenter) return;
@@ -160,7 +176,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
   }
 
   return (
-    <div className="globe-container" onClick={() => setPopup(null)}>
+    <div className="globe-container">
       <GlobeComp
         ref={globeRef}
         globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
@@ -179,6 +195,7 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
         polygonAltitude={(d: any) => d.id === selectedId ? 0.002 : 0.0005}
         polygonStrokeWidth={(d: any) => d.id === selectedId ? 1 : 0}
         onPolygonClick={(d: any) => onSelect(d.id)}
+        onGlobeClick={() => setPopup(null)}
         customLayerData={pinData}
         customThreeObject={(d: any) => {
           const mesh = createPinMesh(d.isSelected);
@@ -192,16 +209,18 @@ export default function Globe({ fields, selectedId, onSelect, onAnalyze, regionC
             obj.position.set(pos.x, pos.y, pos.z);
           }
         }}
-        onCustomLayerClick={(obj: any) => {
-          const d = obj?.userData?.fieldData || obj?.parent?.userData?.fieldData;
-          if (!d) return;
+        // globe.gl вызывает onCustomLayerClick(data, event, coords),
+        // где data — элемент customLayerData (НЕ three-объект)
+        onCustomLayerClick={(d: any) => {
+          if (!d || !d.id) return;
           onSelect(d.id);
+          const field = fields.find((f) => f.id === d.id);
+          const target: Field = field || { id: d.id, region_id: "", crop: d.crop || "", area_ha: d.area_ha || 0, center: [d.lat, d.lng] };
           if (globeRef.current?.getScreenCoords) {
-            const coords = globeRef.current.getScreenCoords(d.lat, d.lng);
-            if (coords) {
-              const field = fields.find((f) => f.id === d.id);
-              if (field) setPopup({ field, x: coords.x, y: coords.y });
-            }
+            try {
+              const coords = globeRef.current.getScreenCoords(d.lat, d.lng);
+              if (coords) setPopup({ field: target, x: coords.x, y: coords.y });
+            } catch { /* ignore */ }
           }
         }}
         onCustomLayerHover={() => {}}
