@@ -1,13 +1,16 @@
-# Render Blueprint: VEGA — Vegetation Intelligence.
+# Render Blueprint: VEGA — Vegetation Intelligence (нативные рантаймы, без Docker).
 # Деплой: Dashboard -> New -> Blueprint -> подключить репозиторий.
+# Версия Python фиксируется файлом .python-version в корне (3.11 —
+# под него есть готовые колёса у всех зафиксированных зависимостей).
 # Postgres/Redis здесь НЕТ сознательно: код их не использует
 # (полигоны хранятся в ./data/polygons.json, кэш — в ./data/cache).
 services:
   - type: web
     name: vega-api
-    runtime: docker
+    runtime: python
     plan: free
-    dockerfilePath: docker/api.Dockerfile
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn apps.api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
       - key: APP_ENV
@@ -25,9 +28,11 @@ services:
         sync: false
   - type: web
     name: vega-web
-    runtime: docker
+    runtime: node
     plan: free
-    dockerfilePath: docker/web.Dockerfile
+    rootDir: apps/web
+    buildCommand: npm install; npm run build
+    startCommand: npm start
     healthCheckPath: /
     envVars:
       - key: NEXT_PUBLIC_API_URL
