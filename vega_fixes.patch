@@ -1,0 +1,52 @@
+diff --git a/ml/models/gbm.py b/ml/models/gbm.py
+index 41297ab..c0d110d 100644
+--- a/ml/models/gbm.py
++++ b/ml/models/gbm.py
+@@ -65,7 +65,7 @@ class GBMModel:
+                 cut = max(int(n * 0.9), n - 5000)
+                 self.model.fit(
+                     Xn.iloc[:cut], y.iloc[:cut],
+-                    eval_X=Xn.iloc[cut:], eval_y=y.iloc[cut:],
++                    eval_set=[(Xn.iloc[cut:], y.iloc[cut:])],
+                     callbacks=[lgb.early_stopping(200, verbose=False)],
+                 )
+                 self.used_backend = "lightgbm"
+diff --git a/scripts/make_submission.py b/scripts/make_submission.py
+index 25fae8b..f951e50 100644
+--- a/scripts/make_submission.py
++++ b/scripts/make_submission.py
+@@ -49,7 +49,7 @@ def main() -> None:
+     sub = pd.DataFrame({
+         "anon_polygon_id": test["polygon_id"],
+         "date": pd.to_datetime(test["date"]).dt.strftime("%Y-%m-%d"),
+-        "primary_ndvi_true": filled.round(6),  # Платформа ожидает primary_ndvi_true
++        "primary_ndvi_pred": filled.round(6),  # ТЗ: колонка должна называться primary_ndvi_pred
+         "_gap": test["is_synthetic_gap"] if "is_synthetic_gap" in test.columns else True,
+     })
+     # Скоринговая выборка — строки с флагом скрытых точек; без флага — все строки.
+diff --git a/services/climatology/climatology.py b/services/climatology/climatology.py
+index 63616de..93878b9 100644
+--- a/services/climatology/climatology.py
++++ b/services/climatology/climatology.py
+@@ -112,7 +112,11 @@ class PastClimatology:
+ 
+             k = bisect.bisect_left(info["years"], int(year))  # годы строго раньше
+             if k == 0:
+-                means[pos] = info["mean"]
++                # Нет ни одного строго прошлого года для этого полигона —
++                # НЕЛЬЗЯ использовать info["mean"] (среднее по ВСЕМ его годам,
++                # включая текущий/будущие — это утечка будущего, §30).
++                # Единственный честный fallback — глобальная (кросс-полигонная) норма.
++                means[pos] = self.global_mean
+                 stds[pos] = self.global_std
+                 continue
+             # циркулярный паддинг по doy для окна ±w
+@@ -134,7 +138,7 @@ class PastClimatology:
+                     means[p] = m
+                     stds[p] = max(float(np.sqrt(max(q_sum / c_sum - m * m, 0.0))), 0.02)
+                 else:
+-                    means[p] = info["mean"]
++                    means[p] = self.global_mean
+                     stds[p] = self.global_std
+         work["past_clim_mean"] = pd.Series(means, index=work.index).fillna(self.global_mean).to_numpy()
+         work["past_clim_std"] = pd.Series(stds, index=work.index).fillna(self.global_std).to_numpy()

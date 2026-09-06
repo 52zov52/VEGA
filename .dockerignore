@@ -1,0 +1,10 @@
+# Не тащить в Docker-контекст мусор: ускоряет загрузку и сборку на Render.
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+node_modules/
+data/cache/
+*.log

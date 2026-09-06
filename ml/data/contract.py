@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 TARGET_COL = "primary_ndvi"
 
 # Ожидаемые колонки временного ряда одного полигона.
+# Все колонки приводятся к нижнему регистру и приведены к стандартным именам.
 OBS_COLUMNS: list[str] = [
     "polygon_id",
     "date",
@@ -33,12 +34,16 @@ META_COLUMNS: list[str] = [
     "processing_version",
 ]
 
+# Версия обработки данных. При изменении схемы данных нужно инкрементировать.
 PROCESSING_VERSION = "v1"
 
 # Алиасы входных датасетов (конкурсный train/test могут называть колонки иначе).
+# Маппинг: старое имя -> новое имя в внутреннем контракте.
 COLUMN_ALIASES: dict[str, str] = {
+    # ID полигона
     "anon_polygon_id": "polygon_id",
     "field_id": "polygon_id",
+    # Базовые индексы
     "ndvi": "primary_ndvi",
     # Конкурсная схема (сенсоры + ERA5):
     "era5_temp_c": "temperature",
@@ -47,7 +52,9 @@ COLUMN_ALIASES: dict[str, str] = {
     "temp": "temperature",
     "rain": "precipitation",
     "precip": "precipitation",
+    # Метаданные
     "crop_type": "crop",
+    # Климатические нормы (есть только в train, нет в test)
     "ndvi_climatology_mean": "clim_mean_given",
     "ndvi_climatology_std": "clim_std_given",
 }
@@ -55,6 +62,7 @@ COLUMN_ALIASES: dict[str, str] = {
 # Колонки, которые нельзя использовать как признаки в момент прогноза:
 # same-day значения сенсоров/ERA5/климатологии организаторов равны NaN
 # во всех скрытых строках, zscore/status есть только в train.
+# Эти признаки должны быть исключены из обучения/предсказания.
 FORBIDDEN_FEATURE_COLS: tuple[str, ...] = (
     "s2_ndvi", "s2_evi", "s2_ndwi",
     "landsat_ndvi", "landsat_evi", "landsat_ndwi",
@@ -65,7 +73,21 @@ FORBIDDEN_FEATURE_COLS: tuple[str, ...] = (
 
 
 def normalize_columns(df):
-    """Приводит имена колонок конкурсного CSV к внутреннему контракту."""
+    """Приводит имена колонок конкурсного CSV к внутреннему контракту.
+
+    Выполняет следующие операции:
+    1. Приводим имена колонок к нижнему регистру и удаляем лишние пробелы
+    2. Приводим колонки к стандартным именам через COLUMN_ALIASES
+     - Проверяем presence обязательных полей
+    3. Приводим типы данных polygon_id и date к требуемому формату
+    4. Добавляем недостающие мета-колонки со значениями по умолчанию
+
+    Args:
+        df: DataFrame с сырыми данными из конкурса
+
+    Returns:
+        DataFrame с приведенными именами колонок и заполненными мета-полями
+    """
     import pandas as pd  # локальный импорт — модуль должен грузиться без pandas при сборке docs
 
     out = df.copy()
@@ -90,7 +112,10 @@ def normalize_columns(df):
 
 @dataclass
 class Observation:
-    """Одна запись временного ряда (§27). None = пропуск/недоступно."""
+    """Одна запись временного ряда (§27).
+
+    None = пропуск/недоступно.
+    """
 
     polygon_id: str
     date: str  # YYYY-MM-DD

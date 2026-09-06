@@ -49,7 +49,7 @@ def main() -> None:
     sub = pd.DataFrame({
         "anon_polygon_id": test["polygon_id"],
         "date": pd.to_datetime(test["date"]).dt.strftime("%Y-%m-%d"),
-        "primary_ndvi_true": filled.round(6),  # Платформа ожидает primary_ndvi_true
+        "primary_ndvi_true": filled.round(6),  # Платформа реально требует именно primary_ndvi_true
         "_gap": test["is_synthetic_gap"] if "is_synthetic_gap" in test.columns else True,
     })
     # Скоринговая выборка — строки с флагом скрытых точек; без флага — все строки.

@@ -112,7 +112,11 @@ class PastClimatology:
 
             k = bisect.bisect_left(info["years"], int(year))  # годы строго раньше
             if k == 0:
-                means[pos] = info["mean"]
+                # Нет ни одного строго прошлого года для этого полигона —
+                # НЕЛЬЗЯ использовать info["mean"] (среднее по ВСЕМ его годам,
+                # включая текущий/будущие — это утечка будущего, §30).
+                # Единственный честный fallback — глобальная (кросс-полигонная) норма.
+                means[pos] = self.global_mean
                 stds[pos] = self.global_std
                 continue
             # циркулярный паддинг по doy для окна ±w
@@ -134,7 +138,7 @@ class PastClimatology:
                     means[p] = m
                     stds[p] = max(float(np.sqrt(max(q_sum / c_sum - m * m, 0.0))), 0.02)
                 else:
-                    means[p] = info["mean"]
+                    means[p] = self.global_mean
                     stds[p] = self.global_std
         work["past_clim_mean"] = pd.Series(means, index=work.index).fillna(self.global_mean).to_numpy()
         work["past_clim_std"] = pd.Series(stds, index=work.index).fillna(self.global_std).to_numpy()

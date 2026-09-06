@@ -1,30 +1,37 @@
+# Render Blueprint: VEGA — Vegetation Intelligence.
+# Деплой: Dashboard -> New -> Blueprint -> подключить репозиторий.
+# Postgres/Redis здесь НЕТ сознательно: код их не использует
+# (полигоны хранятся в ./data/polygons.json, кэш — в ./data/cache).
 services:
   - type: web
     name: vega-api
-    env: docker
-    dockerfilePath: docker/api.Dockerfile
+    runtime: docker
     plan: free
+    dockerfilePath: docker/api.Dockerfile
     healthCheckPath: /api/health
     envVars:
-      - fromFile: .env
-  - type: postgres
-    name: vega-db
-    plan: free
-    preserveStorage: true
-    properties:
-      postgis: true
-  - type: redis
-    name: vega-redis
-    plan: free
+      - key: APP_ENV
+        value: prod
+      # Бесплатный Open-Meteo без ключа + зеркала Overpass (не секреты).
+      - key: WEATHER_API_URL
+        value: https://api.open-meteo.com/v1/forecast
+      - key: OVERPASS_API_URL
+        value: https://overpass.kumi.systems/api/interpreter,https://overpass.private.coffee/api/interpreter,https://overpass-api.de/api/interpreter
+      # Секреты Sentinel Hub: Render спросит значения при создании Blueprint.
+      # Можно оставить пустыми — API будет работать в demo/fallback режиме.
+      - key: SENTINEL_SH_CLIENT_ID
+        sync: false
+      - key: SENTINEL_SH_CLIENT_SECRET
+        sync: false
   - type: web
     name: vega-web
-    env: docker
-    dockerfilePath: docker/web.Dockerfile
+    runtime: docker
     plan: free
+    dockerfilePath: docker/web.Dockerfile
     healthCheckPath: /
     envVars:
       - key: NEXT_PUBLIC_API_URL
         fromService:
-          type: web
           name: vega-api
-          property: url
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
