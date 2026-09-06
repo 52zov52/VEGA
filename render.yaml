@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: vega-api
+    env: docker
+    dockerfilePath: docker/api.Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - fromFile: .env
+  - type: postgres
+    name: vega-db
+    plan: free
+    preserveStorage: true
+    properties:
+      postgis: true
+  - type: redis
+    name: vega-redis
+    plan: free
+  - type: web
+    name: vega-web
+    env: docker
+    dockerfilePath: docker/web.Dockerfile
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: vega-api
+          property: url
